@@ -95,7 +95,7 @@ class GestureWristProcessor:
                     self.last_hit_time = cur_time_ms
 
             # Reset State: Hand is moving back up
-            if norm_dy < -SPEED_THRESHOLD:
+            if norm_dy < 0:
                 self.state_change_frame += 1
                 if self.state_change_frame > STATE_CHANGE_FRAME_THRESHOLD:
                     self.state = UP

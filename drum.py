@@ -75,55 +75,66 @@ class VirtualDrumKit:
                     return drum_name
         return None
     
-    # Add this inside your VirtualDrumKit class in drum.py
     def check_line_intersection(self, p1, p2, cur_time):
         """
+        Check if the line segment from p1 to p2 intersects any drum cylinder.
         p1: (x, y, z) from the previous frame
         p2: (x, y, z) from the current frame
         """
         x1, y1, z1 = p1
         x2, y2, z2 = p2
+        dx = x2 - x1
+        dy = y2 - y1
+        dz = z2 - z1
 
         for drum_name, props in self.drums.items():
             cx, cy, cz = props["center"]
             radius = props["hit_radius"]
-            thickness = 0.15 # The vertical thickness of the drum
-
-            # 1. Did the line cross the Z-depth of this drum?
-            min_z = min(z1, z2)
-            max_z = max(z1, z2)
+            thickness = 0.15  # The vertical thickness of the drum
             drum_top = cz - (thickness / 2)
             drum_bottom = cz + (thickness / 2)
 
-            if max_z < drum_top or min_z > drum_bottom:
-                continue # The line is completely above or below the drum.
+            # Translate to drum center
+            x1_rel = x1 - cx
+            y1_rel = y1 - cy
 
-            # 2. Calculate exactly where the line crossed the drum's Z-plane.
-            # We find the parameter 't' (from 0.0 to 1.0) along the line segment.
-            if z2 != z1:
-                t = (cz - z1) / (z2 - z1)
-                t = max(0.0, min(1.0, t)) # Clamp to the segment length
-            else:
-                t = 1.0
+            # Quadratic coefficients for cylinder intersection: (x)^2 + (y)^2 = r^2
+            a = dx**2 + dy**2
+            b = 2 * (x1_rel * dx + y1_rel * dy)
+            c = x1_rel**2 + y1_rel**2 - radius**2
 
-            # 3. Find the exact X, Y coordinates at that point of crossing
-            intersect_x = x1 + t * (x2 - x1)
-            intersect_y = y1 + t * (y2 - y1)
+            if a == 0:
+                # Line is parallel to z-axis, check if starting point is inside cylinder
+                if c <= 0 and drum_top <= z1 <= drum_bottom:
+                    # Check cooldown
+                    if cur_time - self.last_hit_time[drum_name] > self.hit_cooldown:
+                        self.last_hit_time[drum_name] = cur_time
+                        if drum_name in self.loaded_sounds:
+                            self.loaded_sounds[drum_name].play()
+                        return drum_name
+                continue
 
-            # 4. Check if those X, Y coordinates are inside the drum's radius
-            surface_dist = math.hypot(intersect_x - cx, intersect_y - cy)
+            discriminant = b**2 - 4 * a * c
+            if discriminant < 0:
+                continue  # No intersection with infinite cylinder
 
-            if surface_dist <= radius:
-                # Add the cooldown check just to be safe
-                if cur_time - self.last_hit_time[drum_name] > self.hit_cooldown:
-                    self.last_hit_time[drum_name] = cur_time
-                    
-                    # --- THE MISSING AUDIO TRIGGER ---
-                    if drum_name in self.loaded_sounds:
-                        self.loaded_sounds[drum_name].play()
-                    # ---------------------------------
-                return drum_name
-                
+            sqrt_d = math.sqrt(discriminant)
+            t1 = (-b - sqrt_d) / (2 * a)
+            t2 = (-b + sqrt_d) / (2 * a)
+
+            # Check each intersection point
+            for t in [t1, t2]:
+                if 0 <= t <= 1:
+                    # Compute z at intersection
+                    z_intersect = z1 + t * dz
+                    if drum_top <= z_intersect <= drum_bottom:
+                        # Check cooldown
+                        if cur_time - self.last_hit_time[drum_name] > self.hit_cooldown:
+                            self.last_hit_time[drum_name] = cur_time
+                            if drum_name in self.loaded_sounds:
+                                self.loaded_sounds[drum_name].play()
+                            return drum_name
+
         return None
 
     def cleanup(self):
