@@ -29,6 +29,7 @@ class ARDrumApp:
         self.show_occlusion = False 
         self.show_hit_messages = False  # New Flag for 'j'
         self.show_drum_names = True     # <--- NEW: Toggle for 'n'
+        self.show_left_state = False    # <--- NEW: Toggle for 'y'
         
         # Timestamps to keep hit text on screen for a moment
         self.last_l_hit_time = 0
@@ -127,6 +128,12 @@ class ARDrumApp:
                         if cur_time - self.last_r_hit_time < 0.5:
                             cv2.putText(image, "LEFT HAND HIT!", (self.frame_width - 350, 100), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 3)
 
+                    # --- NEW: Constantly show Left Hand State ---
+                    if self.show_left_state:
+                        # dbg_l["state"] contains either "UP" or "DOWN"
+                        cv2.putText(image, f"LEFT STATE: {dbg_l['state']}", (50, 150), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 3)
+                    # --------------------------------------------
+
                     self._draw_arm_debug(image, dbg_l, (255, 0, 0))
                     self._draw_arm_debug(image, dbg_r, (0, 0, 255))
 
@@ -142,6 +149,7 @@ class ARDrumApp:
             elif key == ord('h'): self.show_occlusion = not self.show_occlusion
             elif key == ord('j'): self.show_hit_messages = not self.show_hit_messages
             elif key == ord('n'): self.show_drum_names = not self.show_drum_names
+            elif key == ord('y'): self.show_left_state = not self.show_left_state  # <--- NEW
 
     def _draw_arm_debug(self, image, dbg, color):
         px = dbg["pos_px"]

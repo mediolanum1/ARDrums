@@ -5,7 +5,7 @@ DOWN = 1
 
 SPEED_THRESHOLD = 0.03
 COOLDOWN_MS = 100
-STATE_CHANGE_FRAME_THRESHOLD = 1
+STATE_CHANGE_FRAME_THRESHOLD = 5
 
 class GestureWristProcessor:
     def __init__(self, label):

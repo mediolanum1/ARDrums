@@ -20,7 +20,7 @@ class VirtualDrumKit:
         self.drums = {
             "Snare": {"center": (0.0, -0.30, -0.45), "draw_radius": 0.41, "hit_radius": 0.35, "squash": 0.35, "pitch": 10, "color_idle": (200, 200, 200), "sound_path": "sounds/Snare Sample.mp3"},
            # "Bass Drum": {"center": (0.35, 0.40, -0.55), "draw_radius": 0.65, "hit_radius": 0.35, "squash": 0.85, "pitch": 0, "color_idle": (50, 50, 50), "sound_path": "sounds/kick.wav"},
-            "Hi-Hat": {"center": (-0.90, -0.25, -0.75), "draw_radius": 0.41, "hit_radius": 0.25, "squash": 0.30, "pitch": 5, "color_idle": (0, 200, 255), "sound_path": "sounds/HI-HAT Top Sample.mp3"},
+            "Hi-Hat": {"center": (-0.90, -0.25, -0.55), "draw_radius": 0.41, "hit_radius": 0.35, "squash": 0.30, "pitch": 5, "color_idle": (0, 200, 255), "sound_path": "sounds/HI-HAT Top Sample.mp3"},
             "High Tom": {"center": (-0.45, -0.73, -0.65), "draw_radius": 0.25, "hit_radius": 0.28, "squash": 0.60, "pitch": 25, "color_idle": (255, 100, 100), "sound_path": "sounds/High Tom Sample.mp3"},
             "Mid Tom": {"center": (0.32, -0.70, -0.65), "draw_radius": 0.33, "hit_radius": 0.28, "squash": 0.60, "pitch": 25, "color_idle": (255, 100, 100), "sound_path": "sounds/Middle Tom Sample.mp3"},
            # "Floor Tom": {"center": (1.10, -0.20, -0.50), "draw_radius": 0.47, "hit_radius": 0.25, "squash": 0.35, "pitch": 10, "color_idle": (200, 100, 100), "sound_path": "sounds/tom_floor.wav"},
