@@ -3,9 +3,14 @@ import math
 UP = 0
 DOWN = 1
 
-SPEED_THRESHOLD = 0.03
+SPEED_THRESHOLD = 0.025
 COOLDOWN_MS = 100
-STATE_CHANGE_FRAME_THRESHOLD = 5
+STATE_CHANGE_FRAME_THRESHOLD = 2
+MIN_DOWNWARD_MOTION = 0.01
+MIN_HORIZONTAL_MOTION = 0.04
+MIN_UPWARD_MOTION = -0.01
+STALL_RESET_FRAME_THRESHOLD = 12
+STALL_SPEED_THRESHOLD = 0.008
 
 class GestureWristProcessor:
     def __init__(self, label):
@@ -49,7 +54,9 @@ class GestureWristProcessor:
         curr_3d_coords = (raw_x, raw_y, self.z_memory)
 
         # 3. 2D Motion Calculation
-        norm_dy = 0
+        norm_dx = 0.0
+        norm_dy = 0.0
+        raw_norm_speed = 0.0
         if self.prev_wrist_px is not None:
             dx = wrist_px[0] - self.prev_wrist_px[0]
             dy = wrist_px[1] - self.prev_wrist_px[1]
@@ -59,14 +66,20 @@ class GestureWristProcessor:
             raw_norm_speed = math.hypot(norm_dx, norm_dy)
             
             # Smooth the speed to prevent frame jitter
-            self.smooth_norm_speed = (self.smooth_norm_speed * 0.5) + (raw_norm_speed * 0.5)
+            self.smooth_norm_speed = (self.smooth_norm_speed * 0.3) + (raw_norm_speed * 0.7)
+
+        downward_motion = norm_dy
+        horizontal_motion = abs(norm_dx)
+        upward_motion = norm_dy
 
         # 4. JOINT ESTIMATION STATE MACHINE
         hit_detected = None
 
         if self.state == UP:
-            # Intent Check: Moving fast and downwards?
-            if self.smooth_norm_speed > SPEED_THRESHOLD and (norm_dy > 0 or norm_dx>0):
+            # Intent Check: moving fast and either downward or horizontally strong enough
+            if raw_norm_speed > SPEED_THRESHOLD and (
+                downward_motion > MIN_DOWNWARD_MOTION or horizontal_motion > MIN_HORIZONTAL_MOTION
+            ):
                 self.state_change_frame += 1
                 if self.state_change_frame > STATE_CHANGE_FRAME_THRESHOLD:
                     self.state = DOWN
@@ -94,10 +107,15 @@ class GestureWristProcessor:
                 if hit_detected:
                     self.last_hit_time = cur_time_ms
 
-            # Reset State: Hand is moving back up
-            if norm_dy < 0:
+            # Reset State: Hand is moving back up or has stalled after a hit
+            if upward_motion < MIN_UPWARD_MOTION:
                 self.state_change_frame += 1
                 if self.state_change_frame > STATE_CHANGE_FRAME_THRESHOLD:
+                    self.state = UP
+                    self.state_change_frame = 0
+            elif self.smooth_norm_speed < STALL_SPEED_THRESHOLD:
+                self.state_change_frame += 1
+                if self.state_change_frame > STALL_RESET_FRAME_THRESHOLD:
                     self.state = UP
                     self.state_change_frame = 0
             else:
