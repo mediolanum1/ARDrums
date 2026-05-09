@@ -66,7 +66,7 @@ class GestureWristProcessor:
 
         if self.state == UP:
             # Intent Check: Moving fast and downwards?
-            if self.smooth_norm_speed > SPEED_THRESHOLD and norm_dy > 0:
+            if self.smooth_norm_speed > SPEED_THRESHOLD and (norm_dy > 0 or norm_dx>0):
                 self.state_change_frame += 1
                 if self.state_change_frame > STATE_CHANGE_FRAME_THRESHOLD:
                     self.state = DOWN
@@ -96,9 +96,12 @@ class GestureWristProcessor:
 
             # Reset State: Hand is moving back up
             if norm_dy < -SPEED_THRESHOLD:
-                self.state = UP
+                self.state_change_frame += 1
+                if self.state_change_frame > STATE_CHANGE_FRAME_THRESHOLD:
+                    self.state = UP
+                    self.state_change_frame = 0
+            else:
                 self.state_change_frame = 0
-
         # Update Memory for the next frame's "Line"
         self.prev_wrist_px = wrist_px
         self.prev_3d_coords = curr_3d_coords
