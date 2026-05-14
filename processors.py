@@ -13,7 +13,8 @@ class GestureWristProcessor:
         self.state = UP
         self.state_change_frame = 0
         self.last_hit_time = 0
-        
+        self.forearm_length_m = 0.25   # fallback default ~25cm
+        self.upper_arm_length_m = 0.30
         # Memory for 2D and 3D previous frames
         self.prev_wrist_px = None
         self.prev_3d_coords = None 
@@ -21,26 +22,38 @@ class GestureWristProcessor:
         self.z_memory = 0.0
         self.z_offset = 0.0
         self.smooth_norm_speed = 0.0
-
-    def process(self, w_scr, w_wrl, sh_scr, sh_wrl, el_scr, sw_m, kit, cur_time_ms, frame_dims, other_sh_scr):
+    def process(self, w_scr, w_wrl, sh_scr, sh_wrl, el_scr, el_wrl, sw_m, kit, cur_time_ms, frame_dims, other_sh_scr):
+        #                                          ^^^^^^ add el_wrl
         w, h = frame_dims
         wrist_px = (w_scr.x * w, w_scr.y * h)
-        
-        # 1. Scale Ruler
+
         current_sw_px = math.hypot(sh_scr.x - other_sh_scr.x, sh_scr.y - other_sh_scr.y) * w
         if current_sw_px == 0: current_sw_px = 1
-        
-        # 2. Depth Math (Occlusion & Tare)
+
+        # --- Reliability score (0 = arm at camera, 1 = arm perpendicular) ---
+        reliability = self._foreshortening_reliability(w_scr, el_scr, sw_m, current_sw_px)
+
+        # --- Existing occlusion + tare logic (unchanged) ---
         dist_ws = math.hypot(w_scr.x - sh_scr.x, w_scr.y - sh_scr.y)
         dist_es = math.hypot(el_scr.x - sh_scr.x, el_scr.y - sh_scr.y)
-        
-        corrected_z = w_wrl.z 
+        corrected_z = w_wrl.z
         is_occluded = dist_ws < 0.15 and dist_es > 0.15
         if is_occluded:
             damp = dist_ws / 0.15
             corrected_z = sh_wrl.z + ((w_wrl.z - sh_wrl.z) * damp)
 
-        raw_z_tared = (corrected_z / sw_m) - self.z_offset
+        mediapipe_z_tared = (corrected_z / sw_m) - self.z_offset
+
+        # --- Arm-length estimated Z ---
+        estimated_z_raw = self._estimate_wrist_z_from_arm(w_wrl, el_wrl, sw_m)
+        if estimated_z_raw is not None:
+            estimated_z_tared = estimated_z_raw - self.z_offset
+            # Blend: low reliability → trust arm-length estimate more
+            blended_z = reliability * mediapipe_z_tared + (1.0 - reliability) * estimated_z_tared
+        else:
+            blended_z = mediapipe_z_tared   # fallback if math breaks
+
+        raw_z_tared = blended_z
         self.z_memory = (self.z_memory * 0.8) + (raw_z_tared * 0.2)
         
         # Calculate current 3D position
@@ -117,3 +130,42 @@ class GestureWristProcessor:
         }
         
         return hit_detected, debug_info
+    
+    def _estimate_wrist_z_from_arm(self, w_wrl, el_wrl, sw_m):
+        """
+        Sphere intersection: wrist lies on sphere of radius forearm_length
+        centered at elbow. Solve for Z using known XY positions.
+
+        Returns estimated Z (normalized by sw_m, tared), or None if unsolvable.
+        """
+        fl_n = self.forearm_length_m / sw_m   # forearm length in shoulder-width units
+
+        # Normalized XY displacement wrist→elbow
+        dx = (w_wrl.x - el_wrl.x) / sw_m
+        dy = (w_wrl.y - el_wrl.y) / sw_m
+
+        xy_dist_sq = dx**2 + dy**2
+
+        # If XY distance already exceeds arm length, model has gone haywire
+        if xy_dist_sq > fl_n**2:
+            return None
+
+        z_component = math.sqrt(fl_n**2 - xy_dist_sq)
+
+        # Wrist is typically in front of (more negative Z than) elbow during a drum hit
+        el_z_n = el_wrl.z / sw_m
+        return el_z_n - z_component   # raw, not yet tared
+
+    def _foreshortening_reliability(self, w_scr, el_scr, sw_m, current_sw_px):
+        """
+        Returns 0.0 (arm fully at camera = MediaPipe Z unreliable)
+        to 1.0 (arm fully perpendicular = MediaPipe Z reliable).
+        """
+        forearm_2d_px = math.hypot(
+            (w_scr.x - el_scr.x),
+            (w_scr.y - el_scr.y)
+        ) * current_sw_px                                  # pixel length of visible forearm
+        forearm_full_px = (self.forearm_length_m / sw_m) * current_sw_px  # expected full length in px
+        if forearm_full_px < 1:
+            return 1.0
+        return min(forearm_2d_px / forearm_full_px, 1.0)  # cosine of angle to camera axis

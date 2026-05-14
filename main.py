@@ -107,15 +107,29 @@ class ARDrumApp:
                                     "ry": int((props["draw_radius"] * fixed_sw_px * props["squash"]) * depth_scale)
                                 }
                             self.is_calibrated = True
+                # In main_render_loop, inside the calibration block, after existing calibration code:
 
+                # Landmarks: 11=L_shoulder, 12=R_shoulder, 13=L_elbow, 14=R_elbow, 15=L_wrist, 16=R_wrist
+                def _measure_segment(a, b):
+                    return math.sqrt((a.x-b.x)**2 + (a.y-b.y)**2 + (a.z-b.z)**2)
+
+                self.left_arm.forearm_length_m  = _measure_segment(w_lm[13], w_lm[15])
+                self.left_arm.upper_arm_length_m = _measure_segment(w_lm[11], w_lm[13])
+                self.right_arm.forearm_length_m = _measure_segment(w_lm[14], w_lm[16])
+                self.right_arm.upper_arm_length_m = _measure_segment(w_lm[12], w_lm[14])
                 # --- LIVE PROCESSING ---
                 if self.is_calibrated:
                     cur_time_ms = int(time.time() * 1000)
                     dims = (self.frame_width, self.frame_height)
 
-                    hit_l, dbg_l = self.left_arm.process(s_lm[15], w_lm[15], s_lm[11], w_lm[11], s_lm[13], self.fixed_sw_m, self.kit, cur_time_ms, dims, s_lm[12])
-                    hit_r, dbg_r = self.right_arm.process(s_lm[16], w_lm[16], s_lm[12], w_lm[12], s_lm[14], self.fixed_sw_m, self.kit, cur_time_ms, dims, s_lm[11])
-
+                    hit_l, dbg_l = self.left_arm.process(
+                        s_lm[15], w_lm[15], s_lm[11], w_lm[11], s_lm[13], w_lm[13],   # + w_lm[13] = L_elbow world
+                        self.fixed_sw_m, self.kit, cur_time_ms, dims, s_lm[12]
+                    )
+                    hit_r, dbg_r = self.right_arm.process(
+                        s_lm[16], w_lm[16], s_lm[12], w_lm[12], s_lm[14], w_lm[14],   # + w_lm[14] = R_elbow world
+                        self.fixed_sw_m, self.kit, cur_time_ms, dims, s_lm[11]
+                    )
                     # Update timestamps if a hit occurred
                     if hit_l: self.last_l_hit_time = cur_time
                     if hit_r: self.last_r_hit_time = cur_time
