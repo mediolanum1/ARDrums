@@ -3,9 +3,9 @@ import math
 UP = 0
 DOWN = 1
 
-SPEED_THRESHOLD = 0.025
+SPEED_THRESHOLD = 0.015
 COOLDOWN_MS = 100
-STATE_CHANGE_FRAME_THRESHOLD = 2
+STATE_CHANGE_FRAME_THRESHOLD = 1
 MIN_DOWNWARD_MOTION = 0.01
 MIN_HORIZONTAL_MOTION = 0.04
 MIN_UPWARD_MOTION = -0.01
@@ -88,18 +88,13 @@ class GestureWristProcessor:
                 self.state_change_frame = 0
 
         elif self.state == DOWN:
-            # --- JOINT ESTIMATION TRIGGER ---
-            # 1. We are in DOWN state (Intent)
-            # 2. We are moving fast enough (Speed)
-            # 3. We draw a line from Prev Frame to Curr Frame (Spatial Raycast)
             
             if (self.smooth_norm_speed > SPEED_THRESHOLD and 
-                self.prev_3d_coords is not None and 
+                self.prev_3d_coords is not None and
+                downward_motion>0 and
                 (cur_time_ms - self.last_hit_time) > COOLDOWN_MS):
                 
-                # Check line intersection!
                 hit_detected = kit.check_line_intersection(
-                    self.prev_3d_coords, 
                     curr_3d_coords, 
                     cur_time_ms / 1000.0
                 )
@@ -108,7 +103,6 @@ class GestureWristProcessor:
                     self.last_hit_time = cur_time_ms
                     self.state=UP
 
-            # Reset State: Hand is moving back up or has stalled after a hit
             if upward_motion < MIN_UPWARD_MOTION:
                 self.state_change_frame += 1
                 if self.state_change_frame > STATE_CHANGE_FRAME_THRESHOLD:

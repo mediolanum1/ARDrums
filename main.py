@@ -120,8 +120,8 @@ class ARDrumApp:
                                 self.cached_drum_positions[name] = {
                                     "cx": int(anchor_x + (props["center"][0] * fixed_sw_px * depth_scale)),
                                     "cy": int(anchor_y + (props["center"][1] * fixed_sw_px * depth_scale)),
-                                    "rx": int((props["draw_radius"] * fixed_sw_px) * depth_scale),
-                                    "ry": int((props["draw_radius"] * fixed_sw_px * props["squash"]) * depth_scale)
+                                    "rx": int((props["dist"][0] * fixed_sw_px) * depth_scale),
+                                    "ry": int((props["dist"][1] * fixed_sw_px * props["squash"]) * depth_scale)
                                 }
                             self.is_calibrated = True
 
