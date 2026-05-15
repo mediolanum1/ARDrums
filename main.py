@@ -80,8 +80,8 @@ class ARDrumApp:
             if not self.result_queue.empty():
                 try: self.result_queue.get_nowait()
                 except queue.Empty: pass
-            if task_result.pose_landmarks and task_result.pose_world_landmarks:
-                self.result_queue.put((image, task_result, time.time()))
+            
+            self.result_queue.put((image, task_result, time.time()))
 
     def main_render_loop(self):
         while self.running:
@@ -89,102 +89,72 @@ class ARDrumApp:
                 image, result, cur_time = self.result_queue.get(timeout=0.1)
             except queue.Empty: continue
             
-            # The Mediapipe Tasks `PoseLandmarkerResult` may expose `pose_landmarks`
-            # and `pose_world_landmarks` either as a LandmarkList or as a list
-            # (batched). Normalize to the LandmarkList with `.landmark` for the
-            # rest of the pipeline.
-            """ s_attr = getattr(result, 'pose_landmarks', None)
-            w_attr = getattr(result, 'pose_world_landmarks', None)
-            if not s_attr or not w_attr:
-                skip_processing = True
-            else:
-                skip_processing = False
+            if result.pose_landmarks and result.pose_world_landmarks:
+                s_lm = result.pose_landmarks[0]
+                w_lm = result.pose_world_landmarks[0]
+                # --- CALIBRATION ---
+                if not self.is_calibrated:
+                    elapsed = cur_time - self.program_start_time
+                    if elapsed < self.COUNTDOWN_SECONDS:
+                        cv2.putText(image, f"READY IN: {int(self.COUNTDOWN_SECONDS - elapsed)}", (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+                    else:
+                        l_sh_w, r_sh_w = w_lm[11], w_lm[12]
+                        l_sh_s, r_sh_s = s_lm[11], s_lm[12]
 
-            # Unwrap batched/list results if necessary
-            if isinstance(s_attr, (list, tuple)) and len(s_attr) > 0:
-                s_lm_list = s_attr[0].landmark
-            else:
-                s_lm_list = getattr(s_attr, 'landmark', None)
+                        if l_sh_s.visibility > 0.5 and r_sh_s.visibility > 0.5:
+                            self.fixed_sw_m = math.sqrt((l_sh_w.x-r_sh_w.x)**2 + (l_sh_w.y-r_sh_w.y)**2 + (l_sh_w.z-r_sh_w.z)**2)
+                            fixed_sw_px = math.hypot((l_sh_s.x-r_sh_s.x)*self.frame_width, (l_sh_s.y-r_sh_s.y)*self.frame_height)
+                            cam_dist_m = (self.fixed_sw_m * self.focal_length) / fixed_sw_px
 
-            if isinstance(w_attr, (list, tuple)) and len(w_attr) > 0:
-                w_lm_list = w_attr[0].landmark
-            else:
-                w_lm_list = getattr(w_attr, 'landmark', None)
+                            self.kit.z_offset["L"] = w_lm[15].z / self.fixed_sw_m
+                            self.kit.z_offset["R"] = w_lm[16].z / self.fixed_sw_m
 
-            if not s_lm_list or not w_lm_list:
-                skip_processing = True
+                            anchor_x = int(((s_lm[23].x + s_lm[24].x) / 2) * self.frame_width)
+                            anchor_y = int(((s_lm[23].y + s_lm[24].y) / 2) * self.frame_height)
 
-            s_lm = s_lm_list
-            w_lm = w_lm_list
+                            self.cached_drum_positions = {}
+                            for name, props in self.kit.drums.items():
+                                drum_z_m = props["center"][2] * self.fixed_sw_m
+                                depth_scale = cam_dist_m / (cam_dist_m + drum_z_m)
 
-            s_lm = s_lm_list
-            w_lm = w_lm_list """
+                                self.cached_drum_positions[name] = {
+                                    "cx": int(anchor_x + (props["center"][0] * fixed_sw_px * depth_scale)),
+                                    "cy": int(anchor_y + (props["center"][1] * fixed_sw_px * depth_scale)),
+                                    "rx": int((props["draw_radius"] * fixed_sw_px) * depth_scale),
+                                    "ry": int((props["draw_radius"] * fixed_sw_px * props["squash"]) * depth_scale)
+                                }
+                            self.is_calibrated = True
 
-            s_lm = result.pose_landmarks[0]
-            w_lm = result.pose_world_landmarks[0]
-            # --- CALIBRATION ---
-            if not self.is_calibrated:
-                elapsed = cur_time - self.program_start_time
-                if elapsed < self.COUNTDOWN_SECONDS:
-                    cv2.putText(image, f"READY IN: {int(self.COUNTDOWN_SECONDS - elapsed)}", (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
-                else:
-                    l_sh_w, r_sh_w = w_lm[11], w_lm[12]
-                    l_sh_s, r_sh_s = s_lm[11], s_lm[12]
+                # --- LIVE PROCESSING ---
+                if self.is_calibrated:
+                    cur_time_ms = int(time.time() * 1000)
+                    dims = (self.frame_width, self.frame_height)
 
-                    if l_sh_s.visibility > 0.5 and r_sh_s.visibility > 0.5:
-                        self.fixed_sw_m = math.sqrt((l_sh_w.x-r_sh_w.x)**2 + (l_sh_w.y-r_sh_w.y)**2 + (l_sh_w.z-r_sh_w.z)**2)
-                        fixed_sw_px = math.hypot((l_sh_s.x-r_sh_s.x)*self.frame_width, (l_sh_s.y-r_sh_s.y)*self.frame_height)
-                        cam_dist_m = (self.fixed_sw_m * self.focal_length) / fixed_sw_px
+                    hit_l, dbg_l = self.left_arm.process(s_lm[15], w_lm[15], s_lm[11], w_lm[11], s_lm[13], self.fixed_sw_m, self.kit, cur_time_ms, dims, s_lm[12])
+                    hit_r, dbg_r = self.right_arm.process(s_lm[16], w_lm[16], s_lm[12], w_lm[12], s_lm[14], self.fixed_sw_m, self.kit, cur_time_ms, dims, s_lm[11])
 
-                        self.kit.z_offset["L"] = w_lm[15].z / self.fixed_sw_m
-                        self.kit.z_offset["R"] = w_lm[16].z / self.fixed_sw_m
+                    # Update timestamps if a hit occurred
+                    if hit_l: self.last_l_hit_time = cur_time
+                    if hit_r: self.last_r_hit_time = cur_time
 
-                        anchor_x = int(((s_lm[23].x + s_lm[24].x) / 2) * self.frame_width)
-                        anchor_y = int(((s_lm[23].y + s_lm[24].y) / 2) * self.frame_height)
+                    # Display "Hand Hit!" messages if 'j' is active
+                    if self.show_hit_messages:
+                        # Show message for 0.5 seconds after hit
+                        if cur_time - self.last_l_hit_time < 0.5:
+                            cv2.putText(image, "RIGHT HAND HIT!", (50, 100), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 3)
+                        if cur_time - self.last_r_hit_time < 0.5:
+                            cv2.putText(image, "LEFT HAND HIT!", (self.frame_width - 350, 100), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 3)
 
-                        self.cached_drum_positions = {}
-                        for name, props in self.kit.drums.items():
-                            drum_z_m = props["center"][2] * self.fixed_sw_m
-                            depth_scale = cam_dist_m / (cam_dist_m + drum_z_m)
+                    # --- NEW: Constantly show Left Hand State ---
+                    if self.show_left_state:
+                        # dbg_l["state"] contains either "UP" or "DOWN"
+                        cv2.putText(image, f"LEFT STATE: {dbg_l['state']}", (50, 150), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 3)
 
-                            self.cached_drum_positions[name] = {
-                                "cx": int(anchor_x + (props["center"][0] * fixed_sw_px * depth_scale)),
-                                "cy": int(anchor_y + (props["center"][1] * fixed_sw_px * depth_scale)),
-                                "rx": int((props["draw_radius"] * fixed_sw_px) * depth_scale),
-                                "ry": int((props["draw_radius"] * fixed_sw_px * props["squash"]) * depth_scale)
-                            }
-                        self.is_calibrated = True
+                    self._draw_arm_debug(image, dbg_l, (255, 0, 0))
+                    self._draw_arm_debug(image, dbg_r, (0, 0, 255))
 
-            # --- LIVE PROCESSING ---
-            if self.is_calibrated:
-                cur_time_ms = int(time.time() * 1000)
-                dims = (self.frame_width, self.frame_height)
-
-                hit_l, dbg_l = self.left_arm.process(s_lm[15], w_lm[15], s_lm[11], w_lm[11], s_lm[13], self.fixed_sw_m, self.kit, cur_time_ms, dims, s_lm[12])
-                hit_r, dbg_r = self.right_arm.process(s_lm[16], w_lm[16], s_lm[12], w_lm[12], s_lm[14], self.fixed_sw_m, self.kit, cur_time_ms, dims, s_lm[11])
-
-                # Update timestamps if a hit occurred
-                if hit_l: self.last_l_hit_time = cur_time
-                if hit_r: self.last_r_hit_time = cur_time
-
-                # Display "Hand Hit!" messages if 'j' is active
-                if self.show_hit_messages:
-                    # Show message for 0.5 seconds after hit
-                    if cur_time - self.last_l_hit_time < 0.5:
-                        cv2.putText(image, "RIGHT HAND HIT!", (50, 100), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 3)
-                    if cur_time - self.last_r_hit_time < 0.5:
-                        cv2.putText(image, "LEFT HAND HIT!", (self.frame_width - 350, 100), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 3)
-
-                # --- NEW: Constantly show Left Hand State ---
-                if self.show_left_state:
-                    # dbg_l["state"] contains either "UP" or "DOWN"
-                    cv2.putText(image, f"LEFT STATE: {dbg_l['state']}", (50, 150), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 3)
-
-                self._draw_arm_debug(image, dbg_l, (255, 0, 0))
-                self._draw_arm_debug(image, dbg_r, (0, 0, 255))
-
-                if self.show_drums and self.cached_drum_positions:
-                    self._draw_drums(image, cur_time)
+                    if self.show_drums and self.cached_drum_positions:
+                        self._draw_drums(image, cur_time)
 
             cv2.imshow('AR Drum Gesture Mode', image)
 
