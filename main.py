@@ -80,20 +80,21 @@ class ARDrumApp:
             if not self.result_queue.empty():
                 try: self.result_queue.get_nowait()
                 except queue.Empty: pass
-            self.result_queue.put((image, task_result, time.time()))
+            if task_result.pose_landmarks and task_result.pose_world_landmarks:
+                self.result_queue.put((image, task_result, time.time()))
 
     def main_render_loop(self):
         while self.running:
             try:
-                image, results, cur_time = self.result_queue.get(timeout=0.1)
+                image, result, cur_time = self.result_queue.get(timeout=0.1)
             except queue.Empty: continue
             
             # The Mediapipe Tasks `PoseLandmarkerResult` may expose `pose_landmarks`
             # and `pose_world_landmarks` either as a LandmarkList or as a list
             # (batched). Normalize to the LandmarkList with `.landmark` for the
             # rest of the pipeline.
-            s_attr = getattr(results, 'pose_landmarks', None)
-            w_attr = getattr(results, 'pose_world_landmarks', None)
+            """ s_attr = getattr(result, 'pose_landmarks', None)
+            w_attr = getattr(result, 'pose_world_landmarks', None)
             if not s_attr or not w_attr:
                 skip_processing = True
             else:
@@ -117,8 +118,10 @@ class ARDrumApp:
             w_lm = w_lm_list
 
             s_lm = s_lm_list
-            w_lm = w_lm_list
-                
+            w_lm = w_lm_list """
+
+            s_lm = result.pose_landmarks[0]
+            w_lm = result.pose_world_landmarks[0]
             # --- CALIBRATION ---
             if not self.is_calibrated:
                 elapsed = cur_time - self.program_start_time
