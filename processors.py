@@ -106,6 +106,7 @@ class GestureWristProcessor:
                 
                 if hit_detected:
                     self.last_hit_time = cur_time_ms
+                    self.state=UP
 
             # Reset State: Hand is moving back up or has stalled after a hit
             if upward_motion < MIN_UPWARD_MOTION:

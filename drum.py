@@ -40,44 +40,10 @@ class VirtualDrumKit:
             else:
                 print(f"WARNING: Missing audio file -> {path}")
 
-    def check_hit(self, x, y, z, current_time):
-        for drum_name, props in self.drums.items():
-            cx, cy, cz = props["center"]
-            radius = props["hit_radius"] 
-            
-            # 1. Translate the hand point to the drum's local space
-            dx = x - cx
-            dy = y - cy
-            dz = z - cz
-            
-            # 2. Get the drum's physical pitch angle
-            pitch_rad = math.radians(props["pitch"])
-            
-            # 3. ARCADE PITCH ROTATION (Rotate around X-axis)
-            local_x = dx
-            local_y = dy * math.cos(pitch_rad) - dz * math.sin(pitch_rad)
-            local_z = dy * math.sin(pitch_rad) + dz * math.cos(pitch_rad)
-            
-            # 4. Check Flat Collision in Local Tilted Space
-            surface_distance = math.sqrt(local_x**2 + local_y**2)
-            depth_distance = abs(local_z)
-            drum_thickness = 0.25 
-            
-            # IT'S A HIT ONLY IF:
-            if surface_distance <= radius and depth_distance <= drum_thickness:
-                if current_time - self.last_hit_time[drum_name] > self.hit_cooldown:
-                    self.last_hit_time[drum_name] = current_time
-                    
-                    # --- NEW: Play the sound instantly! ---
-                    if drum_name in self.loaded_sounds:
-                        self.loaded_sounds[drum_name].play()
-                        
-                    return drum_name
-        return None
     
     def check_line_intersection(self, p1, p2, cur_time):
         """
-        Check if the line segment from p1 to p2 intersects any drum cylinder.
+        Check if the line segment from p1 to p2 intersects any drum in 2D (X-Y) after filtering by Z range.
         p1: (x, y, z) from the previous frame
         p2: (x, y, z) from the current frame
         """
@@ -85,27 +51,35 @@ class VirtualDrumKit:
         x2, y2, z2 = p2
         dx = x2 - x1
         dy = y2 - y1
-        dz = z2 - z1
-
+        
+        # Step 1: Filter possible drums based on Z range of p2
+        possible_drums = []
         for drum_name, props in self.drums.items():
             cx, cy, cz = props["center"]
-            radius = props["hit_radius"]
             thickness = 0.15  # The vertical thickness of the drum
             drum_top = cz - (thickness / 2)
             drum_bottom = cz + (thickness / 2)
-
+            if drum_top <= z2 <= drum_bottom:
+                possible_drums.append(drum_name)
+        
+        # Step 2: For each possible drum, check 2D intersection in X-Y plane
+        for drum_name in possible_drums:
+            props = self.drums[drum_name]
+            cx, cy, cz = props["center"]
+            radius = props["hit_radius"]
+            
             # Translate to drum center
             x1_rel = x1 - cx
             y1_rel = y1 - cy
-
-            # Quadratic coefficients for cylinder intersection: (x)^2 + (y)^2 = r^2
+            
+            # Quadratic coefficients for circle intersection: x^2 + y^2 = r^2
             a = dx**2 + dy**2
             b = 2 * (x1_rel * dx + y1_rel * dy)
             c = x1_rel**2 + y1_rel**2 - radius**2
-
+            
             if a == 0:
-                # Line is parallel to z-axis, check if starting point is inside cylinder
-                if c <= 0 and drum_top <= z1 <= drum_bottom:
+                # Line is parallel to z-axis, check if starting point is inside circle
+                if c <= 0:
                     # Check cooldown
                     if cur_time - self.last_hit_time[drum_name] > self.hit_cooldown:
                         self.last_hit_time[drum_name] = cur_time
@@ -113,28 +87,25 @@ class VirtualDrumKit:
                             self.loaded_sounds[drum_name].play()
                         return drum_name
                 continue
-
+            
             discriminant = b**2 - 4 * a * c
             if discriminant < 0:
-                continue  # No intersection with infinite cylinder
-
+                continue  # No intersection with circle
+            
             sqrt_d = math.sqrt(discriminant)
             t1 = (-b - sqrt_d) / (2 * a)
             t2 = (-b + sqrt_d) / (2 * a)
-
+            
             # Check each intersection point
             for t in [t1, t2]:
                 if 0 <= t <= 1:
-                    # Compute z at intersection
-                    z_intersect = z1 + t * dz
-                    if drum_top <= z_intersect <= drum_bottom:
-                        # Check cooldown
-                        if cur_time - self.last_hit_time[drum_name] > self.hit_cooldown:
-                            self.last_hit_time[drum_name] = cur_time
-                            if drum_name in self.loaded_sounds:
-                                self.loaded_sounds[drum_name].play()
-                            return drum_name
-
+                    # Hit detected in 2D
+                    if cur_time - self.last_hit_time[drum_name] > self.hit_cooldown:
+                        self.last_hit_time[drum_name] = cur_time
+                        if drum_name in self.loaded_sounds:
+                            self.loaded_sounds[drum_name].play()
+                        return drum_name
+        
         return None
 
     def cleanup(self):
