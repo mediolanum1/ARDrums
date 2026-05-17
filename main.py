@@ -96,28 +96,32 @@ class ARDrumApp:
             self.frame_queue.put(image)
 
     def ai_thread(self):
-        options = PoseLandmarkerOptions(
-            base_options=BaseOptions(
-                model_asset_path="./pose_landmarker_models/pose_landmarker_full.task"
-            ),
-            running_mode=vision.RunningMode.VIDEO,
-        )
-        pose_landmarker = PoseLandmarker.create_from_options(options)
+            options = PoseLandmarkerOptions(
+                base_options=BaseOptions(
+                    model_asset_path="./pose_landmarker_models/pose_landmarker_full.task"
+                ),
+                running_mode=vision.RunningMode.VIDEO,
+            )
+            
+            # Use a context manager (with block) to ensure safe C++ cleanup
+            with PoseLandmarker.create_from_options(options) as pose_landmarker:
+                while self.running:
+                    image = self.frame_queue.get()
+                    rgb   = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+                    ts_ms = int(time.time() * 1000)
+                    mp_img = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
+                    
+                    result = pose_landmarker.detect_for_video(mp_img, ts_ms)
 
-        while self.running:
-            image = self.frame_queue.get()
-            rgb   = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-            ts_ms = int(time.time() * 1000)
-            mp_img = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
-            result = pose_landmarker.detect_for_video(mp_img, ts_ms)
-
-            if not self.result_queue.empty():
-                try:
-                    self.result_queue.get_nowait()
-                except queue.Empty:
-                    pass
-            self.result_queue.put((image, result, time.time()))
-
+                    if not self.result_queue.empty():
+                        try:
+                            self.result_queue.get_nowait()
+                        except queue.Empty:
+                            pass
+                    self.result_queue.put((image, result, time.time()))
+                    
+            # When self.running becomes False, the 'with' block ends and 
+            # pose_landmarker.close() is safely called on the correct thread.
     # ─────────────────────── main render loop ──────────────────
 
     def main_render_loop(self):
