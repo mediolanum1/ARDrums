@@ -10,6 +10,9 @@ import math
 from drum import VirtualDrumKit
 from processors import GestureWristProcessor
 
+from stats_collector import StatsCollector                              # ← ADD
+ 
+
 import numpy as np
 
 # ─────────────────────────────────────────────────────────────
@@ -35,7 +38,7 @@ class ARDrumApp:
         self.frame_width  = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         self.frame_height = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
 
-        self.focal_length = (self.frame_width / 2) / math.tan(math.radians(65.0) / 2)
+        self.focal_length = (self.frame_width / 2) / math.tan(math.radians(70.0) / 2)
         self.kit          = VirtualDrumKit()
 
         # ── Calibration state ──────────────────────────────────
@@ -76,6 +79,8 @@ class ARDrumApp:
 
         self.program_start_time = time.time()
         self.COUNTDOWN_SECONDS  = 5
+        self.stats = StatsCollector()                                   # ← ADD
+ 
 
         self.left_arm  = GestureWristProcessor("Left ")
         self.right_arm = GestureWristProcessor("Right ")
@@ -92,7 +97,22 @@ class ARDrumApp:
                 try:
                     self.frame_queue.get_nowait()
                 except queue.Empty:
-                    pass
+
+                    '''
+                    ----- statistics collection block -DEBUG before was just pass
+                    '''
+                    self.stats.record_frame(
+                    cur_time          = time.time(),
+                    pipeline_latency  = 0.0,
+                    shoulder_width_px = self._current_sw_px,
+                    pose_detected     = False,
+                    queue_dropped     = True,
+                    )
+                    if 'image' in locals():
+                        self._show_combined(image, None, None, None, time.time())
+                    continue
+
+                    
             self.frame_queue.put(image)
 
     def ai_thread(self):
@@ -173,8 +193,19 @@ class ARDrumApp:
                     )
                     self.kit.active_stick_ext = (0.0, 0.0, 0.0)
 
-                    if hit_l: self.last_l_hit_time = cur_time
-                    if hit_r: self.last_r_hit_time = cur_time
+                    if hit_l:
+                        self.last_l_hit_time = cur_time
+                        '''
+                        #statistics -DEBUG
+                        '''
+                        self.stats.record_hit(dbg_l.get("drum_name", "unknown_L")) 
+                    if hit_r:
+                        self.last_r_hit_time = cur_time
+                        ''' 
+                        #statistics -DEBUG
+                        '''
+                        self.stats.record_hit(dbg_r.get("drum_name", "unknown_R"))  
+
 
                     if self.show_hit_messages:
                         if cur_time - self.last_l_hit_time < 0.5:
@@ -208,6 +239,34 @@ class ARDrumApp:
                     self._show_combined(image, None, None, None, cur_time)
             else:
                 self._show_combined(image, None, None, None, cur_time)
+
+
+            '''
+            ---- collection statistics block   -DEBUG
+            '''
+            pose_found = bool(result.pose_landmarks and result.pose_world_landmarks)
+ 
+            if pose_found and self.is_calibrated:
+                s_lm = result.pose_landmarks[0]
+                w_lm = result.pose_world_landmarks[0]
+                vis_l = s_lm[15].visibility   # left  wrist landmark
+                vis_r = s_lm[16].visibility   # right wrist landmark
+                # w_lm z values are in metres; normalise by shoulder width
+                z_l = w_lm[15].z / self.fixed_sw_m if self.fixed_sw_m > 0 else 0.0
+                z_r = w_lm[16].z / self.fixed_sw_m if self.fixed_sw_m > 0 else 0.0
+            else:
+                vis_l = vis_r = z_l = z_r = 0.0
+ 
+            self.stats.record_frame(                                    # ← ADD
+                cur_time          = cur_time,
+                pipeline_latency  = time.time() - cur_time,            # age of result
+                shoulder_width_px = self._current_sw_px,
+                pose_detected     = pose_found,
+                wrist_vis_l       = vis_l,
+                wrist_vis_r       = vis_r,
+                wrist_z_l         = z_l,
+                wrist_z_r         = z_r,
+            )
 
             key = cv2.waitKey(1) & 0xFF
             if key == 27:
@@ -312,6 +371,30 @@ class ARDrumApp:
             self.drum_depth_scales[name] = self.cam_dist_m / (self.cam_dist_m + drum_z_m)
 
         self.is_calibrated = True
+
+
+
+
+        '''
+        below is stats collection block -DEBUG
+        '''
+        fixed_sw_px = math.hypot(
+            (s_lm[11].x - s_lm[12].x) * self.frame_width,
+            (s_lm[11].y - s_lm[12].y) * self.frame_height,
+        )
+        self.stats.record_calibration(
+            focal_length      = self.focal_length,
+            assumed_fov_deg   = 65.0,
+            frame_width       = self.frame_width,
+            frame_height      = self.frame_height,
+            fixed_sw_m        = self.fixed_sw_m,
+            fixed_sw_px       = fixed_sw_px,
+            cam_dist_m        = self.cam_dist_m,
+            z_offset_l        = self.kit.z_offset["L"],
+            z_offset_r        = self.kit.z_offset["R"],
+            drum_depth_scales = dict(self.drum_depth_scales),
+        )
+
 
     def _update_drum_positions(self, s_lm):
         l_sh_s, r_sh_s = s_lm[11], s_lm[12]
@@ -630,7 +713,10 @@ class ARDrumApp:
         self.cap.release()
         cv2.destroyAllWindows()
         self.kit.cleanup()
-
+        '''
+        statistics -DEBUG
+        '''
+        self.stats.save()   
 
 if __name__ == "__main__":
     ARDrumApp().start()
