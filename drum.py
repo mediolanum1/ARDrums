@@ -8,9 +8,8 @@ class VirtualDrumKit:
         self.hit_cooldown = 0.2
 
         # --- Global cooldown: after ANY drum is hit, ALL drums are locked ---
-        self.global_last_hit_time = 0.0
-        self.global_hit_cooldown  = 0.2
-
+   
+  
         # ── Stick mode ────────────────────────────────────────────────────────
         self.use_sticks       = False
         self.active_stick_ext = (0.0, 0.0, 0.0)
@@ -57,15 +56,13 @@ class VirtualDrumKit:
             y += ey
             z += ez
 
-        if cur_time - self.global_last_hit_time < self.global_hit_cooldown:
-            return None
 
         possible_drums = []
         for drum_name, props in self.drums.items():
             cx, cy, cz = props["center"]
             rz = props["radii"][2]
             # Z-axis check (Thickness of the drum)
-            if cz <= z <= cz + rz:
+            if cz - rz <= z <= cz + rz:
                 possible_drums.append(drum_name)
 
         for drum_name in possible_drums:
@@ -77,7 +74,7 @@ class VirtualDrumKit:
             if (x - cx) ** 2 / rx ** 2 + (y - cy) ** 2 / ry ** 2 <= 1:
                 if cur_time - self.last_hit_time[drum_name] > self.hit_cooldown:
                     self.last_hit_time[drum_name] = cur_time
-                    self.global_last_hit_time     = cur_time
+                  
                     if drum_name in self.loaded_sounds:
                         self.loaded_sounds[drum_name].play()
                     return drum_name

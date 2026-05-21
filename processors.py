@@ -22,7 +22,7 @@ class GestureWristProcessor:
 
         self.prev_wrist_px = None
         self.prev_3d_coords = None
-
+        self.z_smooth = 0.0  # in __init__
         self.smooth_norm_speed = 0.0
 
     def process(self, w_scr, w_wrl, sh_scr, sh_wrl, el_scr, sw_m, kit, cur_time_ms, frame_dims, other_sh_scr):
@@ -35,7 +35,10 @@ class GestureWristProcessor:
             current_sw_px = 1
 
         # ── Raw MediaPipe world coords — no modification ──────────────────────
-        curr_3d_coords = (w_wrl.x, w_wrl.y, w_wrl.z)
+        #curr_3d_coords = (w_wrl.x, w_wrl.y, w_wrl.z)
+
+        self.z_smooth = 0.7 * self.z_smooth + 0.3 * w_wrl.z  # SMOOTHING HERE,
+        curr_3d_coords = (w_wrl.x, w_wrl.y, self.z_smooth)
 
         # ── 2-D screen-space motion (for gesture state machine only) ─────────
         norm_dx = 0.0

@@ -29,7 +29,7 @@ class ARDrumApp:
         self.frame_queue  = queue.Queue(maxsize=2)
         self.result_queue = queue.Queue(maxsize=2)
         self.running      = True
-
+        self.freeze_drums = True   # True = frozen after first calibration, False = redraws every frame FLAG DRUM
         self.cap          = cv2.VideoCapture(0)
         self.frame_width  = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         self.frame_height = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
@@ -79,26 +79,33 @@ class ARDrumApp:
             success, image = self.cap.read()
             if not success: continue
             image = cv2.flip(image, 1)
-            
-            if not self.frame_queue.empty():
-                try:
-                    self.frame_queue.get_nowait()
-                except queue.Empty:
-                    pass
-                continue
-            self.frame_queue.put(image)
+            try:
+                self.frame_queue.get_nowait()  # drain stale frame
+            except queue.Empty:
+                pass
+            self.frame_queue.put(image)  # always push latest
 
+    def _preprocess(self, frame):
+            lab = cv2.cvtColor(frame, cv2.COLOR_BGR2LAB)
+            l, a, b = cv2.split(lab)
+            clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+            l = clahe.apply(l)
+            return cv2.cvtColor(cv2.merge([l, a, b]), cv2.COLOR_LAB2BGR)
+    
     def ai_thread(self):
         options = PoseLandmarkerOptions(
             base_options=BaseOptions(model_asset_path="./pose_landmarker_models/pose_landmarker_full.task"),
             running_mode=vision.RunningMode.VIDEO,
         )
 
+
         with PoseLandmarker.create_from_options(options) as pose_landmarker:
             while self.running:
                 image = self.frame_queue.get()
+                image = self._preprocess(image)
                 rgb   = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
                 ts_ms = int(time.time() * 1000)
+
                 mp_img = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
 
                 result = pose_landmarker.detect_for_video(mp_img, ts_ms)
@@ -177,7 +184,7 @@ class ARDrumApp:
                         self._draw_hand_ext(image, s_lm[13], s_lm[15], (255, 0, 0))
                         self._draw_hand_ext(image, s_lm[14], s_lm[16], (0, 0, 255))
 
-                    if self.show_drums and self.static_drum_positions:
+                    if self.show_drums and self.cached_drum_positions:
                         self._draw_drums(image, cur_time)
 
                     pov_canvas = self._render_pov_canvas(dbg_l, dbg_r, cur_time, w_lm) if self.show_pov else None
@@ -190,6 +197,7 @@ class ARDrumApp:
             key = cv2.waitKey(1) & 0xFF
             if key == 27:
                 self.running = False
+            elif key == ord("f"): self.freeze_drums      = not self.freeze_drums
             elif key == ord("d"): self.show_drums        = not self.show_drums
             elif key == ord("c"): self.show_coords       = not self.show_coords
             elif key == ord("h"): self.show_occlusion    = not self.show_occlusion
@@ -240,6 +248,7 @@ class ARDrumApp:
             ("[H]",   "Occlusion ring", self.show_occlusion),
             ("[J]",   "Hit messages",   self.show_hit_messages),
             ("[Y]",   "Left-arm state", self.show_left_state),
+            ("[F]",   "Freeze drums",   self.freeze_drums),
             ("[ESC]", "Quit",           None),
         ]
 
@@ -284,12 +293,14 @@ class ARDrumApp:
 
     def _update_drum_positions(self, s_lm):
         l_sh_s, r_sh_s = s_lm[11], s_lm[12]
-        self._current_sw_px = max(1, math.hypot((l_sh_s.x - r_sh_s.x) * self.frame_width, (l_sh_s.y - r_sh_s.y) * self.frame_height))
-        
-        # Maintain pixel scaling factor across varying distances
+        self._current_sw_px = max(1, math.hypot(
+            (l_sh_s.x - r_sh_s.x) * self.frame_width,
+            (l_sh_s.y - r_sh_s.y) * self.frame_height
+        ))
         self.metric_to_px_scale = self._current_sw_px / self.fixed_sw_m if self.fixed_sw_m > 0 else 1.0
 
-        if self.static_drum_positions is not None:
+        # If frozen and we already have positions, keep them
+        if self.freeze_drums and self.static_drum_positions is not None:
             self.cached_drum_positions = self.static_drum_positions
             return
 
@@ -300,17 +311,17 @@ class ARDrumApp:
         for name, props in self.kit.drums.items():
             cx_m, cy_m, _ = props["center"]
             rx_m, ry_m, _ = props["radii"]
-            
-            # Draw exactly the hitbox sizes using the real metric_to_px scale
             positions[name] = {
                 "cx": int(anchor_x + cx_m * self.metric_to_px_scale),
                 "cy": int(anchor_y + cy_m * self.metric_to_px_scale),
                 "rx": int(rx_m * self.metric_to_px_scale),
                 "ry": int(ry_m * self.metric_to_px_scale),
             }
-            
-        self.cached_drum_positions  = positions
-        self.static_drum_positions  = positions
+
+        self.cached_drum_positions = positions
+        # Only lock static positions if freeze mode is on
+        if self.freeze_drums:
+            self.static_drum_positions = positions
 
     def _compute_stick_ext(self, elbow_w, wrist_w):
         dx, dy, dz = wrist_w.x - elbow_w.x, wrist_w.y - elbow_w.y, wrist_w.z - elbow_w.z
@@ -370,15 +381,17 @@ class ARDrumApp:
             cv2.putText(image, f"STATE:{dbg['state']} Z:{dbg['z']:.2f}", (px[0] - 40, px[1] - 40), 0, 1.2, (0, 0, 255), 2)
 
     def _draw_drums(self, image, cur_time):
+        if not self.cached_drum_positions:
+            return
         overlay = image.copy()
-        for name, pos in self.static_drum_positions.items():
+        for name, pos in self.cached_drum_positions.items():
             is_hit = (cur_time - self.kit.last_hit_time[name]) < 0.15
             color  = (0, 255, 0) if is_hit else self.kit.drums[name]["color_idle"]
             cv2.ellipse(overlay, (pos["cx"], pos["cy"]), (max(pos["rx"], 4), max(pos["ry"], 2)), 0, 0, 360, color, -1)
         cv2.addWeighted(overlay, 0.5, image, 0.5, 0, image)
 
         if self.show_drum_names:
-            for name, pos in self.static_drum_positions.items():
+            for name, pos in self.cached_drum_positions.items():
                 label = name.upper()
                 ts = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.8, 2)[0]
                 tx, ty = pos["cx"] - ts[0] // 2, pos["cy"] + ts[1] // 2
