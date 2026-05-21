@@ -2,11 +2,8 @@ import math
 import os
 import pygame
 
-
 class VirtualDrumKit:
     def __init__(self):
-        self.z_memory = {"L": 0.0, "R": 0.0}
-        self.z_offset = {"L": 0.0, "R": 0.0}
         self.last_hit_time = {}
         self.hit_cooldown = 0.2
 
@@ -16,36 +13,27 @@ class VirtualDrumKit:
 
         # ── Stick mode ────────────────────────────────────────────────────────
         self.use_sticks       = False
-        self.stick_length     = 0.35
         self.active_stick_ext = (0.0, 0.0, 0.0)
 
         pygame.mixer.pre_init(frequency=44100, size=-16, channels=2, buffer=512)
         pygame.init()
         pygame.mixer.set_num_channels(16)
 
-        # ── Kit layout ────────────────────────────────────────────────────────
-        # Coordinate origin  : hip midpoint
-        # Units              : shoulder widths
-        # x  left(−) / right(+)  (from player's perspective)
-        # y  up(−)   / down(+)
-        # z  forward(−) / back(+)  (negative = in front of player)
-        #
-        # z-depth changes vs previous:
-        #   Snare       −1.00 → −1.20  (further in front, more natural reach)
-        #   Mid Tom     −1.00 → −0.88  (slightly closer than before)
-        #   Ride Cymbal −0.88 → −0.72  (closer; no z-overlap with Mid Tom:
-        #                               Ride z-slab [−0.845,−0.595],
-        #                               Mid Tom z-slab [−0.99,−0.77] → clear gap)
-                # --- UPGRADED: Added 'sound_path' to each drum ---
+        # ── Kit layout in TRUE METERS ─────────────────────────────────────────
+        # Origin (0,0,0) : Midpoint between your hips
+        # X : Left (-) / Right (+)
+        # Y : Up (-) / Down (+)  [Shoulders are roughly Y = -0.5m]
+        # Z : Forward (-) / Back (+) [Fully extended arm is ~ -0.6m]
+        # 
+        # "radii": (X_radius_m, Y_radius_m, Z_half_thickness_m)
+        # This replaces the old "squash" hack. Visuals and hitboxes are now 1:1.
         self.drums = {
-            "Snare": {"center": (0.0, -0.2, -0.3),"dist":(0.5,0.3,0.2), "squash": 0.35, "pitch": 10, "color_idle": (200, 200, 200), "sound_path": "sounds/Snare Sample.mp3"},
-           # "Bass Drum": {"center": (0.35, 0.40, -0.55), "draw_radius": 0.65, "hit_radius": 0.35, "squash": 0.85, "pitch": 0, "color_idle": (50, 50, 50), "sound_path": "sounds/kick.wav"},
-            "Hi-Hat": {"center": (-0.9, -0.65, -0.45), "dist":(0.5,0.3,0.3), "squash": 0.30, "pitch": 5, "color_idle": (0, 200, 255), "sound_path": "sounds/HI-HAT Top Sample.mp3"},
-            "High Tom": {"center": (-0.30, -0.6, -0.70), "dist":(0.3,0.3,0.2),  "squash": 0.60, "pitch": 25, "color_idle": (255, 100, 100), "sound_path": "sounds/High Tom Sample.mp3"},
-            "Mid Tom": {"center": (0.3, -0.6, -0.70), "dist":(0.3,0.3,0.2),  "squash": 0.60, "pitch": 25, "color_idle": (255, 100, 100), "sound_path": "sounds/Middle Tom Sample.mp3"},
-            #"Floor Tom": {"center": (1.10, -0.20, -0.50), "draw_radius": 0.47, "hit_radius": 0.25, "squash": 0.35, "pitch": 10, "color_idle": (200, 100, 100), "sound_path": "sounds/tom_floor.wav"},
-            "Ride Cymbal": {"center": (0.65, -0.8, -0.50), "dist":(0.3,0.3,0.3), "squash": 0.45, "pitch": 15, "color_idle": (0, 215, 255), "sound_path": "sounds/Ride Cymbal Edge Sample.mp3"},
-            "Crash Cymbal": {"center": (0.20, -0.85, -1.10), "dist":(0.3,0.3,0.2),  "squash": 0.45, "pitch": 15, "color_idle": (0, 215, 255), "sound_path": "sounds/High Crash Cymbal Sample.mp3"}
+            "Snare":        {"center": (0.0,  -0.15, -0.3), "radii": (0.16, 0.07, 0.5), "color_idle": (200, 200, 200), "sound_path": "sounds/Snare Sample.mp3"},
+           # "Hi-Hat":       {"center": (-0.35, -0.25, -0.3), "radii": (0.15, 0.06, 0.08), "color_idle": (0, 200, 255), "sound_path": "sounds/HI-HAT Top Sample.mp3"},
+           ## "High Tom":     {"center": (-0.15, -0.35, -0.35), "radii": (0.14, 0.06, 0.12), "color_idle": (255, 100, 100), "sound_path": "sounds/High Tom Sample.mp3"},
+            #"Mid Tom":      {"center": (0.15,  -0.35, -0.35), "radii": (0.14, 0.06, 0.12), "color_idle": (255, 100, 100), "sound_path": "sounds/Middle Tom Sample.mp3"},
+            #"Ride Cymbal":  {"center": (0.45,  -0.30, -0.3), "radii": (0.20, 0.07, 0.08), "color_idle": (0, 215, 255), "sound_path": "sounds/Ride Cymbal Edge Sample.mp3"},
+            #"Crash Cymbal": {"center": (-0.25, -0.55, -0.37), "radii": (0.20, 0.07, 0.08), "color_idle": (0, 215, 255), "sound_path": "sounds/High Crash Cymbal Sample.mp3"}
         }
 
         self.loaded_sounds = {}
@@ -57,12 +45,9 @@ class VirtualDrumKit:
             else:
                 print(f"WARNING: Missing audio file -> {path}")
 
-    # ─────────────────────────────────────────────────────────────────────────
-
     def check_line_intersection(self, p, cur_time):
         """
-        Check whether the 3-D point p (normalised shoulder-width units, origin
-        at hip midpoint) falls inside any drum zone.
+        Checks 3D hitboxes using exact metric Radii.
         """
         x, y, z = p
 
@@ -78,15 +63,18 @@ class VirtualDrumKit:
         possible_drums = []
         for drum_name, props in self.drums.items():
             cx, cy, cz = props["center"]
-            half_t = props["dist"][2] / 2
-            if cz - half_t <= z <= cz + half_t:
+            rz = props["radii"][2]
+            # Z-axis check (Thickness of the drum)
+            if cz <= z <= cz + rz:
                 possible_drums.append(drum_name)
 
         for drum_name in possible_drums:
             props  = self.drums[drum_name]
             cx, cy, _ = props["center"]
-            dx, dy    = props["dist"][0], props["dist"][1]
-            if (x - cx) ** 2 / dx ** 2 + (y - cy) ** 2 / dy ** 2 <= 1:
+            rx, ry, _ = props["radii"]
+            
+            # X and Y axis check (The face of the drum)
+            if (x - cx) ** 2 / rx ** 2 + (y - cy) ** 2 / ry ** 2 <= 1:
                 if cur_time - self.last_hit_time[drum_name] > self.hit_cooldown:
                     self.last_hit_time[drum_name] = cur_time
                     self.global_last_hit_time     = cur_time

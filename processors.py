@@ -36,24 +36,45 @@ class GestureWristProcessor:
         if current_sw_px == 0:
             current_sw_px = 1
 
-        # 2. Depth / occlusion correction
+        # 2. Depth / occlusion correction (2.5D hybrid)
         dist_ws = math.hypot(w_scr.x - sh_scr.x, w_scr.y - sh_scr.y)
         dist_es = math.hypot(el_scr.x - sh_scr.x, el_scr.y - sh_scr.y)
 
-        corrected_z = w_wrl.z
+ 
+ 
+
+        # Heuristic 2.5D: estimate depth from 2-D projected arm length.
+        # Projected arm length in shoulder-width units (pixel-normalised)
+        proj_arm_px = math.hypot(w_scr.x - el_scr.x, w_scr.y - el_scr.y) * w
+        proj_len_norm = proj_arm_px / max(1.0, current_sw_px)
+
+        # Typical adult forearm+hand length expressed in shoulder-width units (tunable)
+        ARM_LEN_WORLD = 0.65
+        if proj_len_norm > ARM_LEN_WORLD:
+            proj_len_norm = ARM_LEN_WORLD
+
+        # world-derived z (rotated) in shoulder-width units
+        world_z = w_wrl.z
+
+        # z from 2D: magnitude from arm projection, but sign from world estimate
+        z_magnitude = math.sqrt(max(0.0, ARM_LEN_WORLD * ARM_LEN_WORLD - proj_len_norm * proj_len_norm))
+        z_2d = -z_magnitude if world_z < 0 else z_magnitude
+
+        # occlusion confidence: if wrist is occluded, prefer 2D estimate
         is_occluded = dist_ws < 0.15 and dist_es > 0.15
         if is_occluded:
-            damp = dist_ws / 0.15
-            corrected_z = sh_wrl.z + ((w_wrl.z - sh_wrl.z) * damp)
+            chosen_z = z_2d
+        else:
+            # blend world and 2D estimates for stability
+            chosen_z = 0.5 * world_z + 0.5 * z_2d
 
-        raw_z_tared = (corrected_z / sw_m) - self.z_offset
-        self.z_memory = (self.z_memory * 0.8) + (raw_z_tared * 0.2)
+        # smooth temporal memory
+        self.z_memory = (self.z_memory * 0.8) + (chosen_z * 0.2)
 
         # 3D position in shoulder-width normalised units
-        # (same space as drum center coordinates — used for hit detection & POV panel)
-        raw_x = w_wrl.x / sw_m
-        raw_y = w_wrl.y / sw_m
-        curr_3d_coords = (raw_x, raw_y, self.z_memory)
+        # X uses rotated x; Y uses body-relative y
+        
+        curr_3d_coords = (w_wrl.x, w_wrl.y, self.z_memory)
 
         # 3. 2-D motion
         norm_dx = 0.0
@@ -123,6 +144,9 @@ class GestureWristProcessor:
             "sh_px":       (int(sh_scr.x * w), int(sh_scr.y * h)),
             "is_occluded": is_occluded,
             "z":           self.z_memory,
+            "z_2d":        z_2d,
+            "proj_len":    proj_len_norm,
+            "world_z":     world_z,
             "state":       "DOWN" if self.state == DOWN else "UP",
             "hit":         hit_detected,
             "debug_speed": self.smooth_norm_speed,

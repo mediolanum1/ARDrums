@@ -7,26 +7,22 @@ from mediapipe.tasks.python.vision import PoseLandmarker, PoseLandmarkerOptions
 from mediapipe.tasks.python import BaseOptions
 import time
 import math
-from drum import VirtualDrumKit
+import os
+import pygame
+
 from processors import GestureWristProcessor
-
-from stats_collector import StatsCollector                              # ← ADD
- 
-
+from stats_collector import StatsCollector
 import numpy as np
+from drum import VirtualDrumKit
 
-# ─────────────────────────────────────────────────────────────
-# Combined window layout constants
-# ─────────────────────────────────────────────────────────────
-APP_H     = 820          # Fixed target height to make the window taller
-RIGHT_W   = 640          # width of right-side panel (POV + controls)
-POV_H     = 540          # height allocated to POV in right panel (increased)
+
+APP_H     = 820
+RIGHT_W   = 640
+POV_H     = 540
 WIN_NAME  = "AR Drum Kit"
 
-# POV internal render resolution (increased to match taller panel)
 _POV_REN_W = 800
 _POV_REN_H = 640
-
 
 class ARDrumApp:
     def __init__(self):
@@ -38,21 +34,18 @@ class ARDrumApp:
         self.frame_width  = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         self.frame_height = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
 
-        self.focal_length = (self.frame_width / 2) / math.tan(math.radians(70.0) / 2)
+        self.focal_length = (self.frame_width / 2) / math.tan(math.radians(65.0) / 2)
         self.kit          = VirtualDrumKit()
 
-        # ── Calibration state ──────────────────────────────────
-        self.is_calibrated     = False
-        self.fixed_sw_m        = 1.0
-        self.cam_dist_m        = None
-        self.drum_depth_scales = {}
+        self.is_calibrated         = False
+        self.fixed_sw_m            = 1.0
         self.cached_drum_positions = None
-
-        # ── Static drum positions (frozen at calibration) ──────
         self.static_drum_positions = None
-        self._current_sw_px        = 120.0
+        
+        # Scale for converting pure meters to 2D pixels for the web cam overlay
+        self.metric_to_px_scale = 1.0 
+        self._current_sw_px     = 120.0
 
-        # ── Display toggles ────────────────────────────────────
         self.show_drums        = True
         self.show_coords       = False
         self.show_occlusion    = False
@@ -61,88 +54,61 @@ class ARDrumApp:
         self.show_left_state   = False
         self.show_pov          = True
 
-        # ── Stick mode ─────────────────────────────────────────
         self.stick_mode   = False
-        self.stick_length = 0.35
+        self.stick_length = 0
         self._stick_ext_l = (0.0, 0.0, 0.0)
         self._stick_ext_r = (0.0, 0.0, 0.0)
 
-        # ── Stick direction smoothing (2-D screen space) ────────
         self._last_stick_dir_l = (0.0, 1.0)
         self._last_stick_dir_r = (0.0, 1.0)
         self._STICK_MIN_ARM_PX = 22
         self._STICK_BLEND = 0.55
 
-        # ── Hit message timestamps ─────────────────────────────
         self.last_l_hit_time = 0
         self.last_r_hit_time = 0
 
         self.program_start_time = time.time()
         self.COUNTDOWN_SECONDS  = 5
-        self.stats = StatsCollector()                                   # ← ADD
- 
+        self.stats = StatsCollector()
 
         self.left_arm  = GestureWristProcessor("Left ")
         self.right_arm = GestureWristProcessor("Right ")
 
-    # ─────────────────────────── threads ───────────────────────
-
     def camera_thread(self):
         while self.running:
             success, image = self.cap.read()
-            if not success:
-                continue
+            if not success: continue
             image = cv2.flip(image, 1)
+            
             if not self.frame_queue.empty():
                 try:
                     self.frame_queue.get_nowait()
                 except queue.Empty:
-
-                    '''
-                    ----- statistics collection block -DEBUG before was just pass
-                    '''
-                    self.stats.record_frame(
-                    cur_time          = time.time(),
-                    pipeline_latency  = 0.0,
-                    shoulder_width_px = self._current_sw_px,
-                    pose_detected     = False,
-                    queue_dropped     = True,
-                    )
-                    if 'image' in locals():
-                        self._show_combined(image, None, None, None, time.time())
-                    continue
-
-                    
+                    pass
+                continue
             self.frame_queue.put(image)
 
     def ai_thread(self):
-            options = PoseLandmarkerOptions(
-                base_options=BaseOptions(
-                    model_asset_path="./pose_landmarker_models/pose_landmarker_full.task"
-                ),
-                running_mode=vision.RunningMode.VIDEO,
-            )
-            
-            # Use a context manager (with block) to ensure safe C++ cleanup
-            with PoseLandmarker.create_from_options(options) as pose_landmarker:
-                while self.running:
-                    image = self.frame_queue.get()
-                    rgb   = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-                    ts_ms = int(time.time() * 1000)
-                    mp_img = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
-                    
-                    result = pose_landmarker.detect_for_video(mp_img, ts_ms)
+        options = PoseLandmarkerOptions(
+            base_options=BaseOptions(model_asset_path="./pose_landmarker_models/pose_landmarker_full.task"),
+            running_mode=vision.RunningMode.VIDEO,
+        )
 
-                    if not self.result_queue.empty():
-                        try:
-                            self.result_queue.get_nowait()
-                        except queue.Empty:
-                            pass
-                    self.result_queue.put((image, result, time.time()))
-                    
-            # When self.running becomes False, the 'with' block ends and 
-            # pose_landmarker.close() is safely called on the correct thread.
-    # ─────────────────────── main render loop ──────────────────
+        with PoseLandmarker.create_from_options(options) as pose_landmarker:
+            while self.running:
+                image = self.frame_queue.get()
+                rgb   = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+                ts_ms = int(time.time() * 1000)
+                mp_img = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
+
+                result = pose_landmarker.detect_for_video(mp_img, ts_ms)
+
+                if not self.result_queue.empty():
+                    try:
+                        self.result_queue.get_nowait()
+                    except queue.Empty:
+                        pass
+                self.result_queue.put((image, result, time.time()))
 
     def main_render_loop(self):
         while self.running:
@@ -161,8 +127,7 @@ class ARDrumApp:
                     elapsed = cur_time - self.program_start_time
                     if elapsed < self.COUNTDOWN_SECONDS:
                         cv2.putText(
-                            image,
-                            f"READY IN: {int(self.COUNTDOWN_SECONDS - elapsed)}",
+                            image, f"READY IN: {int(self.COUNTDOWN_SECONDS - elapsed)}",
                             (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2,
                         )
                     else:
@@ -183,42 +148,24 @@ class ARDrumApp:
                     self.kit.active_stick_ext = self._stick_ext_l
                     hit_l, dbg_l = self.left_arm.process(
                         s_lm[15], w_lm[15], s_lm[11], w_lm[11], s_lm[13],
-                        self.fixed_sw_m, self.kit, cur_time_ms, dims, s_lm[12],
+                        1.0, self.kit, cur_time_ms, dims, s_lm[12],
                     )
 
                     self.kit.active_stick_ext = self._stick_ext_r
                     hit_r, dbg_r = self.right_arm.process(
                         s_lm[16], w_lm[16], s_lm[12], w_lm[12], s_lm[14],
-                        self.fixed_sw_m, self.kit, cur_time_ms, dims, s_lm[11],
+                        1.0, self.kit, cur_time_ms, dims, s_lm[11],
                     )
                     self.kit.active_stick_ext = (0.0, 0.0, 0.0)
 
-                    if hit_l:
-                        self.last_l_hit_time = cur_time
-                        '''
-                        #statistics -DEBUG
-                        '''
-                        self.stats.record_hit(dbg_l.get("drum_name", "unknown_L")) 
-                    if hit_r:
-                        self.last_r_hit_time = cur_time
-                        ''' 
-                        #statistics -DEBUG
-                        '''
-                        self.stats.record_hit(dbg_r.get("drum_name", "unknown_R"))  
-
+                    if hit_l: self.last_l_hit_time = cur_time
+                    if hit_r: self.last_r_hit_time = cur_time
 
                     if self.show_hit_messages:
                         if cur_time - self.last_l_hit_time < 0.5:
-                            cv2.putText(image, "RIGHT HAND HIT!", (50, 100),
-                                        cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 3)
+                            cv2.putText(image, "RIGHT HAND HIT!", (50, 100), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 3)
                         if cur_time - self.last_r_hit_time < 0.5:
-                            cv2.putText(image, "LEFT HAND HIT!",
-                                        (self.frame_width - 350, 100),
-                                        cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 3)
-
-                    if self.show_left_state:
-                        cv2.putText(image, f"LEFT STATE: {dbg_l['state']}",
-                                    (50, 150), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 3)
+                            cv2.putText(image, "LEFT HAND HIT!", (self.frame_width - 350, 100), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 3)
 
                     self._draw_arm_debug(image, dbg_l, (255, 0, 0))
                     self._draw_arm_debug(image, dbg_r, (0, 0, 255))
@@ -240,52 +187,22 @@ class ARDrumApp:
             else:
                 self._show_combined(image, None, None, None, cur_time)
 
-
-            '''
-            ---- collection statistics block   -DEBUG
-            '''
-            pose_found = bool(result.pose_landmarks and result.pose_world_landmarks)
- 
-            if pose_found and self.is_calibrated:
-                s_lm = result.pose_landmarks[0]
-                w_lm = result.pose_world_landmarks[0]
-                vis_l = s_lm[15].visibility   # left  wrist landmark
-                vis_r = s_lm[16].visibility   # right wrist landmark
-                # w_lm z values are in metres; normalise by shoulder width
-                z_l = w_lm[15].z / self.fixed_sw_m if self.fixed_sw_m > 0 else 0.0
-                z_r = w_lm[16].z / self.fixed_sw_m if self.fixed_sw_m > 0 else 0.0
-            else:
-                vis_l = vis_r = z_l = z_r = 0.0
- 
-            self.stats.record_frame(                                    # ← ADD
-                cur_time          = cur_time,
-                pipeline_latency  = time.time() - cur_time,            # age of result
-                shoulder_width_px = self._current_sw_px,
-                pose_detected     = pose_found,
-                wrist_vis_l       = vis_l,
-                wrist_vis_r       = vis_r,
-                wrist_z_l         = z_l,
-                wrist_z_r         = z_r,
-            )
-
             key = cv2.waitKey(1) & 0xFF
             if key == 27:
                 self.running = False
-            elif key == ord("d"): self.show_drums = not self.show_drums
-            elif key == ord("c"): self.show_coords = not self.show_coords
-            elif key == ord("h"): self.show_occlusion = not self.show_occlusion
+            elif key == ord("d"): self.show_drums        = not self.show_drums
+            elif key == ord("c"): self.show_coords       = not self.show_coords
+            elif key == ord("h"): self.show_occlusion    = not self.show_occlusion
             elif key == ord("j"): self.show_hit_messages = not self.show_hit_messages
-            elif key == ord("n"): self.show_drum_names = not self.show_drum_names
-            elif key == ord("y"): self.show_left_state = not self.show_left_state
-            elif key == ord("p"): self.show_pov = not self.show_pov
+            elif key == ord("n"): self.show_drum_names   = not self.show_drum_names
+            elif key == ord("y"): self.show_left_state   = not self.show_left_state
+            elif key == ord("p"): self.show_pov          = not self.show_pov
             elif key == ord("s"):
                 self.stick_mode     = not self.stick_mode
                 self.kit.use_sticks = self.stick_mode
 
-    # ─────────────────── combined window builder ────────────────
-
     def _show_combined(self, cam_img, pov_canvas, dbg_l, dbg_r, cur_time):
-        cam_w = int(self.frame_width * (APP_H / self.frame_height))
+        cam_w   = int(self.frame_width * (APP_H / self.frame_height))
         total_w = cam_w + RIGHT_W
         ctrl_h  = APP_H - POV_H
 
@@ -299,9 +216,7 @@ class ARDrumApp:
             pov_resized = cv2.resize(pov_canvas, (RIGHT_W, POV_H))
         else:
             pov_resized = np.full((POV_H, RIGHT_W, 3), (12, 14, 22), dtype=np.uint8)
-            cv2.putText(pov_resized, "POV hidden  [P] to show",
-                        (RIGHT_W // 2 - 130, POV_H // 2),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (60, 60, 80), 1)
+            cv2.putText(pov_resized, "POV hidden  [P] to show", (RIGHT_W // 2 - 130, POV_H // 2), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (60, 60, 80), 1)
 
         combined[:POV_H, cam_w:] = pov_resized
         cv2.line(combined, (cam_w, POV_H), (total_w, POV_H), (40, 40, 40), 2)
@@ -356,52 +271,23 @@ class ARDrumApp:
     def _calibrate(self, s_lm, w_lm):
         l_sh_w, r_sh_w = w_lm[11], w_lm[12]
         l_sh_s, r_sh_s = s_lm[11], s_lm[12]
-        if l_sh_s.visibility <= 0.5 or r_sh_s.visibility <= 0.5: return
+        if l_sh_s.visibility <= 0.5 or r_sh_s.visibility <= 0.5:
+            return
 
-        self.fixed_sw_m  = math.sqrt((l_sh_w.x - r_sh_w.x)**2 + (l_sh_w.y - r_sh_w.y)**2 + (l_sh_w.z - r_sh_w.z)**2)
-        fixed_sw_px      = math.hypot((l_sh_s.x - r_sh_s.x) * self.frame_width, (l_sh_s.y - r_sh_s.y) * self.frame_height)
-        self.cam_dist_m  = (self.fixed_sw_m * self.focal_length) / fixed_sw_px
+        self.fixed_sw_m = math.sqrt((l_sh_w.x - r_sh_w.x)**2 + (l_sh_w.y - r_sh_w.y)**2 + (l_sh_w.z - r_sh_w.z)**2)
+        fixed_sw_px = math.hypot((l_sh_s.x - r_sh_s.x) * self.frame_width, (l_sh_s.y - r_sh_s.y) * self.frame_height)
 
-        self.kit.z_offset["L"] = w_lm[15].z / self.fixed_sw_m
-        self.kit.z_offset["R"] = w_lm[16].z / self.fixed_sw_m
+        self.metric_to_px_scale = fixed_sw_px / self.fixed_sw_m if self.fixed_sw_m > 0 else 1.0
 
-        self.drum_depth_scales = {}
-        for name, props in self.kit.drums.items():
-            drum_z_m = props["center"][2] * self.fixed_sw_m
-            self.drum_depth_scales[name] = self.cam_dist_m / (self.cam_dist_m + drum_z_m)
-
+        print(f"[CAL] sw={self.fixed_sw_m:.3f} m")
         self.is_calibrated = True
-
-
-
-
-        '''
-        below is stats collection block -DEBUG
-        '''
-        fixed_sw_px = math.hypot(
-            (s_lm[11].x - s_lm[12].x) * self.frame_width,
-            (s_lm[11].y - s_lm[12].y) * self.frame_height,
-        )
-        self.stats.record_calibration(
-            focal_length      = self.focal_length,
-            assumed_fov_deg   = 65.0,
-            frame_width       = self.frame_width,
-            frame_height      = self.frame_height,
-            fixed_sw_m        = self.fixed_sw_m,
-            fixed_sw_px       = fixed_sw_px,
-            cam_dist_m        = self.cam_dist_m,
-            z_offset_l        = self.kit.z_offset["L"],
-            z_offset_r        = self.kit.z_offset["R"],
-            drum_depth_scales = dict(self.drum_depth_scales),
-        )
-
 
     def _update_drum_positions(self, s_lm):
         l_sh_s, r_sh_s = s_lm[11], s_lm[12]
-        self._current_sw_px = max(1, math.hypot(
-            (l_sh_s.x - r_sh_s.x) * self.frame_width,
-            (l_sh_s.y - r_sh_s.y) * self.frame_height,
-        ))
+        self._current_sw_px = max(1, math.hypot((l_sh_s.x - r_sh_s.x) * self.frame_width, (l_sh_s.y - r_sh_s.y) * self.frame_height))
+        
+        # Maintain pixel scaling factor across varying distances
+        self.metric_to_px_scale = self._current_sw_px / self.fixed_sw_m if self.fixed_sw_m > 0 else 1.0
 
         if self.static_drum_positions is not None:
             self.cached_drum_positions = self.static_drum_positions
@@ -412,19 +298,19 @@ class ARDrumApp:
 
         positions = {}
         for name, props in self.kit.drums.items():
-            ds             = self.drum_depth_scales.get(name, 1.0)
-            cx_norm, cy_norm, _ = props["center"]
-            dx_norm, dy_norm    = props["dist"][0], props["dist"][1]
+            cx_m, cy_m, _ = props["center"]
+            rx_m, ry_m, _ = props["radii"]
+            
+            # Draw exactly the hitbox sizes using the real metric_to_px scale
             positions[name] = {
-                "cx": int(anchor_x + cx_norm * self._current_sw_px * ds),
-                "cy": int(anchor_y + cy_norm * self._current_sw_px * ds),
-                "rx": int(dx_norm * self._current_sw_px * ds),
-                "ry": int(dy_norm * props["squash"] * self._current_sw_px * ds),
+                "cx": int(anchor_x + cx_m * self.metric_to_px_scale),
+                "cy": int(anchor_y + cy_m * self.metric_to_px_scale),
+                "rx": int(rx_m * self.metric_to_px_scale),
+                "ry": int(ry_m * self.metric_to_px_scale),
             }
+            
         self.cached_drum_positions  = positions
         self.static_drum_positions  = positions
-
-    # ─────────────────────── stick helpers ─────────────────────
 
     def _compute_stick_ext(self, elbow_w, wrist_w):
         dx, dy, dz = wrist_w.x - elbow_w.x, wrist_w.y - elbow_w.y, wrist_w.z - elbow_w.z
@@ -436,23 +322,18 @@ class ARDrumApp:
         W, H = self.frame_width, self.frame_height
         ew = (int(elbow_s.x * W), int(elbow_s.y * H))
         wr = (int(wrist_s.x * W), int(wrist_s.y * H))
-
         dx = wr[0] - ew[0]
         dy = wr[1] - ew[1]
         arm_len_px = math.hypot(dx, dy)
 
-        if side == 'l':
-            cached = self._last_stick_dir_l
-        else:
-            cached = self._last_stick_dir_r
+        cached = self._last_stick_dir_l if side == 'l' else self._last_stick_dir_r
 
         if arm_len_px >= self._STICK_MIN_ARM_PX:
             ndx, ndy = dx / arm_len_px, dy / arm_len_px
             bx = cached[0] * (1 - self._STICK_BLEND) + ndx * self._STICK_BLEND
             by = cached[1] * (1 - self._STICK_BLEND) + ndy * self._STICK_BLEND
             mag = math.hypot(bx, by)
-            if mag > 1e-6:
-                bx, by = bx / mag, by / mag
+            if mag > 1e-6: bx, by = bx / mag, by / mag
             new_dir = (bx, by)
         else:
             bx = cached[0] * 0.97 + 0.0 * 0.03
@@ -460,20 +341,14 @@ class ARDrumApp:
             mag = math.hypot(bx, by)
             new_dir = (bx / mag, by / mag) if mag > 1e-6 else cached
 
-        if side == 'l':
-            self._last_stick_dir_l = new_dir
-        else:
-            self._last_stick_dir_r = new_dir
+        if side == 'l': self._last_stick_dir_l = new_dir
+        else: self._last_stick_dir_r = new_dir
 
         ndx, ndy = new_dir
-        stick_px_len = self.stick_length * self._current_sw_px * 1.5
-        tip = (
-            int(wr[0] + ndx * stick_px_len),
-            int(wr[1] + ndy * stick_px_len),
-        )
+        stick_px_len = self.stick_length * self.metric_to_px_scale
+        tip = (int(wr[0] + ndx * stick_px_len), int(wr[1] + ndy * stick_px_len))
         cv2.line(image, wr, tip, color, 4)
         cv2.circle(image, tip, 7, (255, 240, 80), -1)
-        cv2.circle(image, tip, 7, (0,   0,   0),  1)
 
     def _draw_hand_ext(self, image, elbow_s, wrist_s, color):
         W, H = self.frame_width, self.frame_height
@@ -482,32 +357,24 @@ class ARDrumApp:
         dx = wr[0] - ew[0]
         dy = wr[1] - ew[1]
         arm_len_px = math.hypot(dx, dy)
-        if arm_len_px < 1:
-            return
-        hand_px_len = self._current_sw_px * 0.15
-        tip = (
-            int(wr[0] + (dx / arm_len_px) * hand_px_len),
-            int(wr[1] + (dy / arm_len_px) * hand_px_len),
-        )
-        cv2.line(image,  wr, tip, color, 3)
+        if arm_len_px < 1: return
+        hand_px_len = self.metric_to_px_scale * 0.15
+        tip = (int(wr[0] + (dx / arm_len_px) * hand_px_len), int(wr[1] + (dy / arm_len_px) * hand_px_len))
+        cv2.line(image, wr, tip, color, 3)
         cv2.circle(image, tip, 5, color, -1)
 
     def _draw_arm_debug(self, image, dbg, color):
         px = dbg["pos_px"]
         cv2.circle(image, px, 15, (0, 255, 0) if dbg["hit"] else color, -1)
         if self.show_coords:
-            cv2.putText(image, f"STATE:{dbg['state']} Z:{dbg['z']:.2f}",
-                        (px[0] - 40, px[1] - 40), 0, 1.2, (0, 0, 255), 2)
-        if self.show_occlusion and dbg["is_occluded"]:
-            cv2.circle(image, dbg["sh_px"], int(0.15 * self.frame_width), (0, 0, 255), 2)
+            cv2.putText(image, f"STATE:{dbg['state']} Z:{dbg['z']:.2f}", (px[0] - 40, px[1] - 40), 0, 1.2, (0, 0, 255), 2)
 
     def _draw_drums(self, image, cur_time):
         overlay = image.copy()
         for name, pos in self.static_drum_positions.items():
             is_hit = (cur_time - self.kit.last_hit_time[name]) < 0.15
             color  = (0, 255, 0) if is_hit else self.kit.drums[name]["color_idle"]
-            cv2.ellipse(overlay, (pos["cx"], pos["cy"]),
-                        (max(pos["rx"], 4), max(pos["ry"], 2)), 0, 0, 360, color, -1)
+            cv2.ellipse(overlay, (pos["cx"], pos["cy"]), (max(pos["rx"], 4), max(pos["ry"], 2)), 0, 0, 360, color, -1)
         cv2.addWeighted(overlay, 0.5, image, 0.5, 0, image)
 
         if self.show_drum_names:
@@ -516,41 +383,21 @@ class ARDrumApp:
                 ts = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.8, 2)[0]
                 tx, ty = pos["cx"] - ts[0] // 2, pos["cy"] + ts[1] // 2
                 cv2.putText(image, label, (tx, ty), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 0), 4)
-                cv2.putText(image, label, (tx, ty), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
-
-    # ─────────────────────── TRUE POV canvas ────────────────────────
+                cv2.putText(image, label, (tx, ty), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
 
     def _render_pov_canvas(self, dbg_l, dbg_r, cur_time, w_lm=None):
         canvas = np.full((_POV_REN_H, _POV_REN_W, 3), (8, 10, 18), dtype=np.uint8)
 
-        # ── Virtual first-person camera ────────────────────────────────────
-        CX_KIT = 0.0
-        CY_KIT = -1.0
-        CZ_KIT = -0.15
-
-        PITCH = math.radians(35)  
-        
-        # LOWER SCALE widens the Field of View (Wide-angle lens effect)
         SCALE = 140
-
         cx_c = _POV_REN_W // 2
         cy_c = _POV_REN_H // 2 - 20
 
         def project(x, y, z):
-            x -= CX_KIT
-            y -= CY_KIT
-            z -= CZ_KIT
-            
-            y_rot = y * math.cos(PITCH) + z * math.sin(PITCH)
-            z_rot = -y * math.sin(PITCH) + z * math.cos(PITCH)
-            
-            depth = z_rot
-            dist  = -depth
-            
+            depth = z
+            dist  = -depth if depth < 0 else depth
             if dist < 0.1: dist = 0.1
-            
-            px = int(cx_c + (x  / dist) * SCALE)
-            py = int(cy_c + (y_rot / dist) * SCALE)
+            px = int(cx_c + (x / dist) * SCALE)
+            py = int(cy_c + (y / dist) * SCALE)
             return px, py, depth, dist
 
         rq = []
@@ -560,35 +407,28 @@ class ARDrumApp:
         XS = [-1.1, -0.7, -0.28, 0, 0.28, 0.7, 1.1]
         ZS = [-0.35, -0.55, -0.75, -0.95, -1.15]
         for gx in XS:
-            p1 = project(gx, GRID_Y, ZS[0])
-            p2 = project(gx, GRID_Y, ZS[-1])
+            p1, p2 = project(gx, GRID_Y, ZS[0]), project(gx, GRID_Y, ZS[-1])
             rq.append({"t": "line", "depth": (p1[2]+p2[2])/2, "p1": p1[:2], "p2": p2[:2], "color": (30, 42, 58), "w": 1})
         for gz in ZS:
-            p1 = project(XS[0],  GRID_Y, gz)
-            p2 = project(XS[-1], GRID_Y, gz)
+            p1, p2 = project(XS[0], GRID_Y, gz), project(XS[-1], GRID_Y, gz)
             rq.append({"t": "line", "depth": (p1[2]+p2[2])/2, "p1": p1[:2], "p2": p2[:2], "color": (30, 42, 58), "w": 1})
 
-        # ── Drums ─────────────────────────────────────────────────────────
-        
-        # INCREASED DRUM SCALE so they don't look tiny with the new wide-angle lens
-        DRUM_SCALE = 2.0  
-
+        # ── Drums (Accurate True 1:1 Metric Scale) ────────────────────────
         for name, props in self.kit.drums.items():
             cx, cy, cz = props["center"]
             is_hit = (cur_time - self.kit.last_hit_time[name]) < 0.20
             col    = (0, 240, 60) if is_hit else props["color_idle"]
             ppx, ppy, depth, dist = project(cx, cy, cz)
-            
-            rx    = max(int((props["dist"][0] * SCALE * 0.5 * DRUM_SCALE) / dist), 4)
-            ry    = max(int((props["dist"][1] * props["squash"] * SCALE * 0.5 * DRUM_SCALE) / dist), 2)
-            thick = max(int((props["dist"][2] * SCALE * 0.4 * DRUM_SCALE) / dist), 2)
-            
+
+            rx_m, ry_m, rz_m = props["radii"]
+            rx    = max(int((rx_m * SCALE) / dist), 4)
+            ry    = max(int((ry_m * SCALE) / dist), 2)
+            thick = max(int((rz_m * 2 * SCALE) / dist), 2)
+
             rq.append({"t": "drum", "depth": depth, "name": name,
                        "px": ppx, "py": ppy, "rx": rx, "ry": ry, "thick": thick, "col": col})
 
         # ── Arms ──────────────────────────────────────────────────────────
-        ARM_Y_OFFSET = 0.2
-
         sw = self.fixed_sw_m
         if w_lm and sw > 0:
             arm_defs = [
@@ -599,14 +439,11 @@ class ARDrumApp:
                 if sh_w.visibility < 0.3 or el_w.visibility < 0.3 or wr_w.visibility < 0.3:
                     continue
 
-                sh3 = (sh_w.x / sw, sh_w.y / sw + ARM_Y_OFFSET, sh_w.z / sw)
-                el3 = (el_w.x / sw, el_w.y / sw + ARM_Y_OFFSET, el_w.z / sw)
-                wr3 = (wr_w.x / sw, wr_w.y / sw + ARM_Y_OFFSET, wr_w.z / sw)
+                sh3 = (sh_w.x, sh_w.y, sh_w.z)
+                el3 = (el_w.x, el_w.y, el_w.z)
+                wr3 = (wr_w.x, wr_w.y, wr_w.z)
 
-                sh_p = project(*sh3)
-                el_p = project(*el3)
-                wr_p = project(*wr3)
-
+                sh_p, el_p, wr_p = project(*sh3), project(*el3), project(*wr3)
                 line_w = max(2, int(8 / el_p[3]))
                 rq.append({"t": "line", "depth": (sh_p[2]+el_p[2])/2, "p1": sh_p[:2], "p2": el_p[:2], "color": arm_col, "w": line_w})
                 rq.append({"t": "line", "depth": (el_p[2]+wr_p[2])/2, "p1": el_p[:2], "p2": wr_p[:2], "color": arm_col, "w": line_w})
@@ -616,95 +453,59 @@ class ARDrumApp:
                 rq.append({"t": "dot", "depth": sh_p[2], "px": sh_p[0], "py": sh_p[1], "col": arm_col, "r": rad_sh})
                 rq.append({"t": "dot", "depth": el_p[2], "px": el_p[0], "py": el_p[1], "col": arm_col, "r": rad_el})
 
-                fw_x = wr3[0] - el3[0]
-                fw_y = wr3[1] - el3[1]
-                fw_z = wr3[2] - el3[2]
+                fw_x, fw_y, fw_z = wr3[0] - el3[0], wr3[1] - el3[1], wr3[2] - el3[2]
                 fw_mag = math.sqrt(fw_x**2 + fw_y**2 + fw_z**2)
 
-                if self.stick_mode:
-                    if fw_mag > 1e-3:
-                        ext_len = self.stick_length * 1.5
-                        tip3 = (
-                            wr3[0] + (fw_x / fw_mag) * ext_len,
-                            wr3[1] + (fw_y / fw_mag) * ext_len,
-                            wr3[2] + (fw_z / fw_mag) * ext_len,
-                        )
-                        tp_p = project(*tip3)
-                        stick_w = max(1, int(6  / tp_p[3]))
-                        tip_r   = max(2, int(10 / tp_p[3]))
-                        rq.append({"t": "line", "depth": (wr_p[2]+tp_p[2])/2,
-                                   "p1": wr_p[:2], "p2": tp_p[:2], "color": (255, 220, 50), "w": stick_w})
-                        rq.append({"t": "dot", "depth": tp_p[2],
-                                   "px": tp_p[0], "py": tp_p[1], "col": (255, 220, 50), "r": tip_r})
-                else:
-                    if fw_mag > 1e-3:
-                        hand_len = 0.15
-                        htip3 = (
-                            wr3[0] + (fw_x / fw_mag) * hand_len,
-                            wr3[1] + (fw_y / fw_mag) * hand_len,
-                            wr3[2] + (fw_z / fw_mag) * hand_len,
-                        )
-                        htp_p  = project(*htip3)
-                        hand_w = max(1, int(5 / htp_p[3]))
-                        hand_r = max(2, int(6 / htp_p[3]))
-                        rq.append({"t": "line", "depth": (wr_p[2]+htp_p[2])/2,
-                                   "p1": wr_p[:2], "p2": htp_p[:2], "color": arm_col, "w": hand_w})
-                        rq.append({"t": "dot", "depth": htp_p[2],
-                                   "px": htp_p[0], "py": htp_p[1], "col": arm_col, "r": hand_r})
+                if self.stick_mode and fw_mag > 1e-3:
+                    ext_len = self.stick_length
+                    tip3 = (wr3[0] + (fw_x/fw_mag)*ext_len, wr3[1] + (fw_y/fw_mag)*ext_len, wr3[2] + (fw_z/fw_mag)*ext_len)
+                    tp_p = project(*tip3)
+                    stick_w = max(1, int(6 / tp_p[3]))
+                    tip_r   = max(2, int(10 / tp_p[3]))
+                    rq.append({"t": "line", "depth": (wr_p[2]+tp_p[2])/2, "p1": wr_p[:2], "p2": tp_p[:2], "color": (255, 220, 50), "w": stick_w})
+                    rq.append({"t": "dot", "depth": tp_p[2], "px": tp_p[0], "py": tp_p[1], "col": (255, 220, 50), "r": tip_r})
+                elif not self.stick_mode and fw_mag > 1e-3:
+                    hand_len = 0.15
+                    htip3 = (wr3[0] + (fw_x/fw_mag)*hand_len, wr3[1] + (fw_y/fw_mag)*hand_len, wr3[2] + (fw_z/fw_mag)*hand_len)
+                    htp_p = project(*htip3)
+                    hand_w = max(1, int(5 / htp_p[3]))
+                    hand_r = max(2, int(6 / htp_p[3]))
+                    rq.append({"t": "line", "depth": (wr_p[2]+htp_p[2])/2, "p1": wr_p[:2], "p2": htp_p[:2], "color": arm_col, "w": hand_w})
+                    rq.append({"t": "dot", "depth": htp_p[2], "px": htp_p[0], "py": htp_p[1], "col": arm_col, "r": hand_r})
 
                 is_hit_wrist = dbg.get("hit", False)
                 wrist_col    = (0, 255, 60) if is_hit_wrist else arm_col
                 rad_wr = max(4, int(14 / wr_p[3]))
-                rq.append({"t": "hand", "depth": wr_p[2],
-                           "px": wr_p[0], "py": wr_p[1], "col": wrist_col,
-                           "state": dbg.get("state", ""), "r": rad_wr})
+                rq.append({"t": "hand", "depth": wr_p[2], "px": wr_p[0], "py": wr_p[1], "col": wrist_col, "state": dbg.get("state", ""), "r": rad_wr})
 
-        # ── Painter's sort + draw ─────────────────────────────────────────
         rq.sort(key=lambda i: i["depth"])
 
         for item in rq:
             t = item["t"]
-            if t == "line":
-                cv2.line(canvas, item["p1"], item["p2"], item["color"], item["w"])
-            elif t == "dot":
-                cv2.circle(canvas, (item["px"], item["py"]), item["r"], item["col"], -1)
+            if t == "line": cv2.line(canvas, item["p1"], item["p2"], item["color"], item["w"])
+            elif t == "dot": cv2.circle(canvas, (item["px"], item["py"]), item["r"], item["col"], -1)
             elif t == "drum":
-                ppx, ppy         = item["px"], item["py"]
-                rx, ry, thick    = item["rx"], item["ry"], item["thick"]
-                c                = item["col"]
+                ppx, ppy = item["px"], item["py"]
+                rx, ry, thick = item["rx"], item["ry"], item["thick"]
+                c = item["col"]
                 shade = (int(c[0]*0.45), int(c[1]*0.45), int(c[2]*0.45))
                 cv2.ellipse(canvas, (ppx, ppy+thick), (rx, ry), 0, 0, 360, shade, -1)
-                pts = np.array([(ppx-rx, ppy), (ppx+rx, ppy),
-                                (ppx+rx, ppy+thick), (ppx-rx, ppy+thick)], dtype=np.int32)
+                pts = np.array([(ppx-rx, ppy), (ppx+rx, ppy), (ppx+rx, ppy+thick), (ppx-rx, ppy+thick)], dtype=np.int32)
                 cv2.fillPoly(canvas, [pts], shade)
                 cv2.ellipse(canvas, (ppx, ppy), (rx, ry), 0, 0, 360, c, -1)
                 cv2.ellipse(canvas, (ppx, ppy), (rx, ry), 0, 0, 360, (170, 170, 170), 1)
                 lbl = item["name"][:3].upper()
                 ts  = cv2.getTextSize(lbl, cv2.FONT_HERSHEY_SIMPLEX, 0.48, 1)[0]
-                lx, ly = ppx - ts[0]//2, ppy + ts[1]//2
-                cv2.putText(canvas, lbl, (lx, ly), cv2.FONT_HERSHEY_SIMPLEX, 0.48, (0,   0,   0), 3)
-                cv2.putText(canvas, lbl, (lx, ly), cv2.FONT_HERSHEY_SIMPLEX, 0.48, (255, 255, 255), 1)
+                cv2.putText(canvas, lbl, (ppx - ts[0]//2, ppy + ts[1]//2), cv2.FONT_HERSHEY_SIMPLEX, 0.48, (0, 0, 0), 3)
+                cv2.putText(canvas, lbl, (ppx - ts[0]//2, ppy + ts[1]//2), cv2.FONT_HERSHEY_SIMPLEX, 0.48, (255, 255, 255), 1)
             elif t == "hand":
                 ppx, ppy, r, c = item["px"], item["py"], item["r"], item["col"]
-                if item["state"] == "DOWN":
-                    cv2.circle(canvas, (ppx, ppy), r + 8, c, 2)
+                if item["state"] == "DOWN": cv2.circle(canvas, (ppx, ppy), r + 8, c, 2)
                 cv2.circle(canvas, (ppx, ppy), r, c, -1)
                 cv2.circle(canvas, (ppx, ppy), r, (255, 255, 255), 1)
 
-        # ── HUD labels ────────────────────────────────────────────────────
-        cv2.putText(canvas, "TRUE 1ST PERSON POV", (12, 22),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 210, 210), 1)
-        cv2.circle(canvas, (12, _POV_REN_H-48), 7, (100, 220, 255), -1)
-        cv2.putText(canvas, "Left arm",  (24,  _POV_REN_H-43), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (100, 220, 255), 1)
-        cv2.circle(canvas, (110, _POV_REN_H-48), 7, (80, 80, 255), -1)
-        cv2.putText(canvas, "Right arm", (122, _POV_REN_H-43), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (80, 80, 255), 1)
-        if self.stick_mode:
-            cv2.putText(canvas, "STICKS ON", (_POV_REN_W - 110, 22),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 220, 50), 1)
-
+        cv2.putText(canvas, "TRUE 1ST PERSON POV", (12, 22), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 210, 210), 1)
         return canvas
-
-    # ─────────────────────────── start ─────────────────────────
 
     def start(self):
         threading.Thread(target=self.camera_thread, daemon=True).start()
@@ -713,10 +514,7 @@ class ARDrumApp:
         self.cap.release()
         cv2.destroyAllWindows()
         self.kit.cleanup()
-        '''
-        statistics -DEBUG
-        '''
-        self.stats.save()   
+        self.stats.save()
 
 if __name__ == "__main__":
     ARDrumApp().start()
