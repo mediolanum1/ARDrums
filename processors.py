@@ -19,7 +19,7 @@ class GestureWristProcessor:
         self.state = UP
         self.state_change_frame = 0
         self.last_hit_time = 0
-
+        
         self.prev_wrist_px = None
         self.prev_3d_coords = None
         self.z_smooth = 0.0  # in __init__
@@ -37,7 +37,9 @@ class GestureWristProcessor:
         # ── Raw MediaPipe world coords — no modification ──────────────────────
         #curr_3d_coords = (w_wrl.x, w_wrl.y, w_wrl.z)
 
-        self.z_smooth = 0.7 * self.z_smooth + 0.3 * w_wrl.z  # SMOOTHING HERE,
+        #self.z_smooth = 0.7 * self.z_smooth + 0.3 * w_wrl.z  # SMOOTHING HERE,
+        self.z_smooth =  w_wrl.z  # SMOOTHING HERE,
+        
         curr_3d_coords = (w_wrl.x, w_wrl.y, self.z_smooth)
 
         # ── 2-D screen-space motion (for gesture state machine only) ─────────
@@ -78,8 +80,10 @@ class GestureWristProcessor:
                     (cur_time_ms - self.last_hit_time) > COOLDOWN_MS):
 
                 hit_detected = kit.check_line_intersection(
+                    self.prev_3d_coords,
                     curr_3d_coords,
-                    cur_time_ms / 1000.0
+                    cur_time_ms / 1000.0,
+                    self.smooth_norm_speed
                 )
 
                 if hit_detected:

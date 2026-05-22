@@ -44,39 +44,30 @@ class VirtualDrumKit:
             else:
                 print(f"WARNING: Missing audio file -> {path}")
 
-    def check_line_intersection(self, p, cur_time):
-        """
-        Checks 3D hitboxes using exact metric Radii.
-        """
-        x, y, z = p
-
-        if self.use_sticks:
-            ex, ey, ez = self.active_stick_ext
-            x += ex
-            y += ey
-            z += ez
-
-
-        possible_drums = []
+    def check_line_intersection(self, p_prev, p_curr, cur_time, smooth_norm_speed):
         for drum_name, props in self.drums.items():
-            cx, cy, cz = props["center"]
+            cz = props["center"][2]
             rz = props["radii"][2]
-            # Z-axis check (Thickness of the drum)
-            if cz - rz <= z <= cz + rz:
-                possible_drums.append(drum_name)
-
-        for drum_name in possible_drums:
-            props  = self.drums[drum_name]
+            z0, z1 = p_prev[2], p_curr[2]
+            # Did the segment cross the Z slab?
+            if not ((z0 <= cz + rz and z1 >= cz - rz) or 
+                    (z1 <= cz + rz and z0 >= cz - rz)):
+                continue
+            # Interpolate position at the crossing point
+            t = (cz - z0) / (z1 - z0) if z1 != z0 else 0.5
+            xi = p_prev[0] + t * (p_curr[0] - p_prev[0])
+            yi = p_prev[1] + t * (p_curr[1] - p_prev[1])
             cx, cy, _ = props["center"]
             rx, ry, _ = props["radii"]
-            
-            # X and Y axis check (The face of the drum)
-            if (x - cx) ** 2 / rx ** 2 + (y - cy) ** 2 / ry ** 2 <= 1:
+            if (xi - cx)**2 / rx**2 + (yi - cy)**2 / ry**2 <= 1:
+                # cooldown check + play sound
                 if cur_time - self.last_hit_time[drum_name] > self.hit_cooldown:
                     self.last_hit_time[drum_name] = cur_time
                   
-                    if drum_name in self.loaded_sounds:
-                        self.loaded_sounds[drum_name].play()
+                    if drum_name in self.loaded_sounds: 
+                        sound = self.loaded_sounds[drum_name]
+                        sound.set_volume(min(1.0, smooth_norm_speed * 8))
+                        sound.play()
                     return drum_name
 
         return None

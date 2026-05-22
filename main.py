@@ -33,7 +33,7 @@ class ARDrumApp:
         self.cap          = cv2.VideoCapture(0)
         self.frame_width  = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         self.frame_height = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-
+        self._clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
         self.focal_length = (self.frame_width / 2) / math.tan(math.radians(65.0) / 2)
         self.kit          = VirtualDrumKit()
 
@@ -54,7 +54,7 @@ class ARDrumApp:
         self.show_left_state   = False
         self.show_pov          = True
 
-        self.stick_mode   = False
+        self.stick_mode   = True
         self.stick_length = 0
         self._stick_ext_l = (0.0, 0.0, 0.0)
         self._stick_ext_r = (0.0, 0.0, 0.0)
@@ -88,8 +88,8 @@ class ARDrumApp:
     def _preprocess(self, frame):
             lab = cv2.cvtColor(frame, cv2.COLOR_BGR2LAB)
             l, a, b = cv2.split(lab)
-            clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
-            l = clahe.apply(l)
+           
+            l = self._clahe.apply(l)
             return cv2.cvtColor(cv2.merge([l, a, b]), cv2.COLOR_LAB2BGR)
     
     def ai_thread(self):
