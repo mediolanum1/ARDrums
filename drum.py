@@ -7,10 +7,6 @@ class VirtualDrumKit:
         self.last_hit_time = {}
         self.hit_cooldown = 0.2
 
-        # --- Global cooldown: after ANY drum is hit, ALL drums are locked ---
-        self.global_last_hit_time = 0.0
-        self.global_hit_cooldown  = 0.2
-
         # ── Stick mode ────────────────────────────────────────────────────────
         self.use_sticks       = False
         self.active_stick_ext = (0.0, 0.0, 0.0)
@@ -29,7 +25,7 @@ class VirtualDrumKit:
         # This replaces the old "squash" hack. Visuals and hitboxes are now 1:1.
         self.drums = {
             "Snare":        {"center": (0.0,  -0.15, -0.3), "radii": (0.16, 0.07, 0.5), "color_idle": (200, 200, 200), "sound_path": "sounds/Snare Sample.mp3"},
-           # "Hi-Hat":       {"center": (-0.35, -0.25, -0.3), "radii": (0.15, 0.06, 0.08), "color_idle": (0, 200, 255), "sound_path": "sounds/HI-HAT Top Sample.mp3"},
+            "Hi-Hat":       {"center": (-0.35, -0.25, -0.3), "radii": (0.15, 0.06, 0.5), "color_idle": (0, 200, 255), "sound_path": "sounds/HI-HAT Top Sample.mp3"},
            ## "High Tom":     {"center": (-0.15, -0.35, -0.35), "radii": (0.14, 0.06, 0.12), "color_idle": (255, 100, 100), "sound_path": "sounds/High Tom Sample.mp3"},
             #"Mid Tom":      {"center": (0.15,  -0.35, -0.35), "radii": (0.14, 0.06, 0.12), "color_idle": (255, 100, 100), "sound_path": "sounds/Middle Tom Sample.mp3"},
             #"Ride Cymbal":  {"center": (0.45,  -0.30, -0.3), "radii": (0.20, 0.07, 0.08), "color_idle": (0, 215, 255), "sound_path": "sounds/Ride Cymbal Edge Sample.mp3"},
@@ -57,9 +53,6 @@ class VirtualDrumKit:
             y += ey
             z += ez
 
-        if cur_time - self.global_last_hit_time < self.global_hit_cooldown:
-            return None
-
         possible_drums = []
         for drum_name, props in self.drums.items():
             cx, cy, cz = props["center"]
@@ -77,7 +70,6 @@ class VirtualDrumKit:
             if (x - cx) ** 2 / rx ** 2 + (y - cy) ** 2 / ry ** 2 <= 1:
                 if cur_time - self.last_hit_time[drum_name] > self.hit_cooldown:
                     self.last_hit_time[drum_name] = cur_time
-                    self.global_last_hit_time     = cur_time
                     if drum_name in self.loaded_sounds:
                         self.loaded_sounds[drum_name].play()
                     return drum_name

@@ -110,7 +110,7 @@ class GestureWristProcessor:
         elif self.state == DOWN:
             if (self.smooth_norm_speed > SPEED_THRESHOLD and
                     self.prev_3d_coords is not None and
-                    downward_motion > 0 and
+                    (downward_motion > 0 or horizontal_motion > MIN_HORIZONTAL_MOTION) and
                     (cur_time_ms - self.last_hit_time) > COOLDOWN_MS):
 
                 hit_detected = kit.check_line_intersection(
