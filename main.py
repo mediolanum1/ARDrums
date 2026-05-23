@@ -22,6 +22,7 @@ import pygame
 
 import torch
 from processors1 import GestureWristProcessor
+from foot_processor import GestureFootProcessor          # ← NEW
 from stats_collector import StatsCollector
 import numpy as np
 from drum import VirtualDrumKit
@@ -106,8 +107,9 @@ class ARDrumApp:
         self._STICK_MIN_ARM_PX = 22
         self._STICK_BLEND      = 0.55
 
-        self.last_l_hit_time = 0
-        self.last_r_hit_time = 0
+        self.last_l_hit_time    = 0
+        self.last_r_hit_time    = 0
+        self.last_foot_hit_time = 0          # ← NEW: bass drum hit flash timer
 
         self.program_start_time = time.time()
         self.COUNTDOWN_SECONDS  = 5
@@ -116,13 +118,17 @@ class ARDrumApp:
         self.left_arm  = GestureWristProcessor("L")
         self.right_arm = GestureWristProcessor("R")
 
+        # ── Bass-drum foot processor (right foot) ─────────────────────────
+        self.right_foot = GestureFootProcessor("RF")   # ← NEW
+        # ──────────────────────────────────────────────────────────────────
+
         # ── Depth Anything V2 state ────────────────────────────────────────
-        self.depth_anything_loaded = False   # True once model is in memory
-        self.depth_active          = False   # runtime on/off toggle
+        self.depth_anything_loaded = False
+        self.depth_active          = False
         self._depth_frame_queue    = queue.Queue(maxsize=2)
-        self._latest_depth_map     = None    # H×W float32, from DepthAnyV2
+        self._latest_depth_map     = None
         self._depth_lock           = threading.Lock()
-        self._depth_status_msg     = ""      # shown in UI while loading
+        self._depth_status_msg     = ""
         # ──────────────────────────────────────────────────────────────────
 
     # ── Camera thread ─────────────────────────────────────────────────────────
@@ -134,14 +140,12 @@ class ARDrumApp:
                 continue
             image = cv2.flip(image, 1)
 
-            # Main pose queue — keep only latest
             try:
                 self.frame_queue.get_nowait()
             except queue.Empty:
                 pass
             self.frame_queue.put(image)
 
-            # Depth queue — only push if depth thread is running
             if USE_DEPTH_ANYTHING or self.depth_anything_loaded:
                 try:
                     self._depth_frame_queue.get_nowait()
@@ -154,23 +158,11 @@ class ARDrumApp:
     def _preprocess(self, frame):
         lab = cv2.cvtColor(frame, cv2.COLOR_BGR2LAB)
         l, a, b = cv2.split(lab)
-        
-        # 1. Apply CLAHE
         l = self._clahe.apply(l)
-        
-        # 2. Blur slightly to avoid sharpening CLAHE's noise
         blurred_l = cv2.GaussianBlur(l, (3, 3), 0)
-        
-        # 3. Calculate Laplacian (16-bit signed to handle negatives)
         laplacian = cv2.Laplacian(blurred_l, cv2.CV_16S, ksize=3)
-        
-        # 4. Safely subtract to sharpen (convert 'l' to int16 first)
         sharpened_l = np.int16(l) - laplacian
-        
-        # 5. Clip values to valid 0-255 range and convert back to uint8
         l_final = np.clip(sharpened_l, 0, 255).astype(np.uint8)
-        
-        # 6. Reconstruct and return
         return cv2.cvtColor(cv2.merge([l_final, a, b]), cv2.COLOR_LAB2BGR)
 
     # ── MediaPipe AI thread ───────────────────────────────────────────────────
@@ -185,11 +177,8 @@ class ARDrumApp:
         with PoseLandmarker.create_from_options(options) as pose_landmarker:
             while self.running:
                 raw_image = self.frame_queue.get()
-                
-                # Preprocess a temporary copy of the image to send to MediaPipe
                 processed_image = self._preprocess(raw_image)
                 rgb   = cv2.cvtColor(processed_image, cv2.COLOR_BGR2RGB)
-                
                 ts_ms = int(time.time() * 1000)
                 mp_img = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
                 result = pose_landmarker.detect_for_video(mp_img, ts_ms)
@@ -199,8 +188,6 @@ class ARDrumApp:
                         self.result_queue.get_nowait()
                     except queue.Empty:
                         pass
-                
-                # Crucial Fix: Put the unmodified RAW image back into the rendering queue
                 self.result_queue.put((raw_image, result, time.time()))
 
     # ── Depth Anything V2 thread ──────────────────────────────────────────────
@@ -214,7 +201,6 @@ class ARDrumApp:
             model_configs = {
                 'vits': {'encoder': 'vits', 'features': 64, 'out_channels': [48, 96, 192, 384]}
             }
-            
             pipe = DepthAnythingV2(**{**model_configs['vits'], 'max_depth': 20})
             pipe.load_state_dict(torch.load('depth_anything_v2_metric_hypersim_vits.pth', map_location='cpu'))
             pipe = pipe.to(device).eval()
@@ -270,12 +256,14 @@ class ARDrumApp:
         d_hip = (self._depth_at_screen_lm(l_hip, dm) +
                  self._depth_at_screen_lm(r_hip, dm)) / 2.0
 
-        arm_indices = (11, 12, 13, 14, 15, 16)
-        for idx in arm_indices:
+        # Patch arms AND legs so the foot processor gets depth-fused Z too
+        fused_indices = (11, 12, 13, 14, 15, 16,   # arms / wrists
+                         25, 26, 27, 28)             # knees / ankles  ← NEW
+        for idx in fused_indices:
             if s_lm[idx].visibility < 0.4:
                 continue
             d_joint = self._depth_at_screen_lm(s_lm[idx], dm)
-            z_new = _DEPTH_SIGN * (d_joint - d_hip) 
+            z_new   = _DEPTH_SIGN * (d_joint - d_hip)
             patched[idx] = _LM(w_lm[idx], z=z_new)
 
         return patched
@@ -288,7 +276,7 @@ class ARDrumApp:
                 image, result, cur_time = self.result_queue.get(timeout=0.1)
             except queue.Empty:
                 if 'image' in locals():
-                    self._show_combined(image, None, None, None, time.time())
+                    self._show_combined(image, None, None, None, None, time.time())
                 continue
 
             if result.pose_landmarks and result.pose_world_landmarks:
@@ -320,6 +308,7 @@ class ARDrumApp:
                         self._draw_stick_ar(image, s_lm[13], s_lm[15], (255, 200, 50), side='l')
                         self._draw_stick_ar(image, s_lm[14], s_lm[16], (50, 220, 255), side='r')
 
+                    # ── Wrist processors ──────────────────────────────────
                     self.kit.active_stick_ext = self._stick_ext_l
                     hit_l, dbg_l = self.left_arm.process(
                         s_lm[15], w_lm_eff[15], s_lm[11], w_lm_eff[11], s_lm[13],
@@ -333,30 +322,43 @@ class ARDrumApp:
                     )
                     self.kit.active_stick_ext = (0.0, 0.0, 0.0)
 
-                    if hit_l: self.last_l_hit_time = cur_time
-                    if hit_r: self.last_r_hit_time = cur_time
+                    # ── Foot / bass-drum processor ─────────────────────────
+                    # Right ankle (28), right hip (24), left hip (23)
+                    hit_foot, dbg_foot = self.right_foot.process(
+                        ankle_scr     = s_lm[28],
+                        ankle_wrl     = w_lm_eff[28],
+                        hip_scr       = s_lm[24],
+                        other_hip_scr = s_lm[23],
+                        kit           = self.kit,
+                        cur_time_ms   = cur_time_ms,
+                        frame_dims    = dims,
+                        mediapipe_present = (s_lm[28].visibility > 0.3),
+                    )
 
-                    
+                    if hit_l:    self.last_l_hit_time    = cur_time
+                    if hit_r:    self.last_r_hit_time    = cur_time
+                    if hit_foot: self.last_foot_hit_time = cur_time   # ← NEW
+
                     self._draw_arm_debug(image, dbg_l, (255, 0, 0))
                     self._draw_arm_debug(image, dbg_r, (0, 0, 255))
+                    self._draw_foot_debug(image, dbg_foot)            # ← NEW
 
                     if self.stick_mode:
                         self._draw_stick_ar(image, s_lm[13], s_lm[15], (255, 200, 50), side='l')
                         self._draw_stick_ar(image, s_lm[14], s_lm[16], (50, 220, 255), side='r')
 
-
                     if self.show_drums and self.cached_drum_positions:
                         self._draw_drums(image, cur_time)
 
                     pov_canvas = (
-                        self._render_pov_canvas(dbg_l, dbg_r, cur_time, w_lm_eff)
+                        self._render_pov_canvas(dbg_l, dbg_r, dbg_foot, cur_time, w_lm_eff)
                         if self.show_pov else None
                     )
-                    self._show_combined(image, pov_canvas, dbg_l, dbg_r, cur_time)
+                    self._show_combined(image, pov_canvas, dbg_l, dbg_r, dbg_foot, cur_time)
                 else:
-                    self._show_combined(image, None, None, None, cur_time)
+                    self._show_combined(image, None, None, None, None, cur_time)
             else:
-                self._show_combined(image, None, None, None, cur_time)
+                self._show_combined(image, None, None, None, None, cur_time)
 
             key = cv2.waitKey(1) & 0xFF
             if key == 27:
@@ -382,7 +384,7 @@ class ARDrumApp:
 
     # ── UI helpers ────────────────────────────────────────────────────────────
 
-    def _show_combined(self, cam_img, pov_canvas, dbg_l, dbg_r, cur_time):
+    def _show_combined(self, cam_img, pov_canvas, dbg_l, dbg_r, dbg_foot, cur_time):
         cam_w   = int(self.frame_width * (APP_H / self.frame_height))
         total_w = cam_w + RIGHT_W
         ctrl_h  = APP_H - POV_H
@@ -404,12 +406,12 @@ class ARDrumApp:
         combined[:POV_H, cam_w:] = pov_resized
         cv2.line(combined, (cam_w, POV_H), (total_w, POV_H), (40, 40, 40), 2)
 
-        ctrl_panel = self._build_controls_panel(RIGHT_W, ctrl_h, dbg_l, dbg_r, cur_time)
+        ctrl_panel = self._build_controls_panel(RIGHT_W, ctrl_h, dbg_l, dbg_r, dbg_foot, cur_time)
         combined[POV_H:, cam_w:] = ctrl_panel
 
         cv2.imshow(WIN_NAME, combined)
 
-    def _build_controls_panel(self, w, h, dbg_l, dbg_r, cur_time):
+    def _build_controls_panel(self, w, h, dbg_l, dbg_r, dbg_foot, cur_time):
         panel = np.full((h, w, 3), (14, 16, 24), dtype=np.uint8)
         cv2.rectangle(panel, (0, 0), (w, 32), (24, 28, 42), -1)
         cv2.putText(panel, "CONTROLS", (14, 22), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 210, 210), 1)
@@ -438,7 +440,7 @@ class ARDrumApp:
             ("[ESC]", "Quit",           None),
         ]
 
-        row_h = max(26, (h - 50) // len(keys))
+        row_h = max(26, (h - 60) // len(keys))
         for i, (key, label, state) in enumerate(keys):
             y  = 44 + i * row_h
             kw = cv2.getTextSize(key, cv2.FONT_HERSHEY_SIMPLEX, 0.52, 1)[0][0]
@@ -454,13 +456,19 @@ class ARDrumApp:
                 lbl = "ON" if state else "off"
                 cv2.putText(panel, lbl, (dot_x - 26, y), cv2.FONT_HERSHEY_SIMPLEX, 0.38, dot_col, 1)
 
+        # ── Hit flashes ───────────────────────────────────────────────────
         base_y = h - 18
+        col_hit = (0, 255, 120)
         if dbg_l and (cur_time - self.last_l_hit_time) < 0.4:
             cv2.putText(panel, "LEFT  HIT!", (14, base_y),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 255, 120), 2)
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.55, col_hit, 2)
         if dbg_r and (cur_time - self.last_r_hit_time) < 0.4:
-            cv2.putText(panel, "RIGHT HIT!", (w // 2 + 10, base_y),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 255, 120), 2)
+            cv2.putText(panel, "RIGHT HIT!", (w // 2 - 60, base_y),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.55, col_hit, 2)
+        # Bass drum hit flash — shown in orange below the two hand labels   ← NEW
+        if dbg_foot and (cur_time - self.last_foot_hit_time) < 0.4:
+            cv2.putText(panel, "KICK!", (w // 2 - 22, base_y - 22),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 130, 255), 2)
 
         if self._depth_status_msg:
             col = (0, 200, 100) if self.depth_active else (120, 120, 140)
@@ -509,6 +517,21 @@ class ARDrumApp:
 
         positions = {}
         for name, props in self.kit.drums.items():
+            if name == "Bass Drum":
+                # Bass drum is anchored at the right ankle, not the hip midpoint.
+                # Only show if ankle is visible.
+                r_ankle = s_lm[28]
+                if r_ankle.visibility > 0.3:
+                    rx_m, ry_m, _ = props["radii"]
+                    positions[name] = {
+                        "cx": int(r_ankle.x * self.frame_width),
+                        "cy": int(r_ankle.y * self.frame_height),
+                        # Slightly wider than tall in camera view (drum from front)
+                        "rx": int(rx_m * self.metric_to_px_scale * 0.9),
+                        "ry": int(ry_m * self.metric_to_px_scale * 0.45),
+                    }
+                continue
+
             cx_m, cy_m, _ = props["center"]
             rx_m, ry_m, _ = props["radii"]
             positions[name] = {
@@ -567,8 +590,6 @@ class ARDrumApp:
         cv2.line(image, wr, tip, color, 4)
         cv2.circle(image, tip, 7, (255, 240, 80), -1)
 
-    
-
     def _draw_arm_debug(self, image, dbg, color):
         px = dbg["pos_px"]
         cv2.circle(image, px, 15, (0, 255, 0) if dbg["hit"] else color, -1)
@@ -578,6 +599,35 @@ class ARDrumApp:
                 f"STATE:{dbg['state']} Z:{dbg['z']:.2f}",
                 (px[0] - 40, px[1] - 40),
                 0, 1.2, (0, 0, 255), 2,
+            )
+
+    def _draw_foot_debug(self, image, dbg):
+        """Draw right-ankle overlay for bass-drum state visualisation."""
+        if dbg is None:
+            return
+        px = dbg["pos_px"]
+        is_hit      = bool(dbg.get("hit"))
+        is_pressing = dbg.get("state") == "DOWN"
+
+        # Outer ring: orange when pressing, dim when idle
+        ring_col = (0, 130, 255) if is_pressing else (80, 60, 30)
+        cv2.circle(image, px, 20, ring_col, 2)
+
+        # Filled dot: bright on hit
+        dot_col = (0, 200, 255) if is_hit else (180, 100, 30)
+        cv2.circle(image, px, 10, dot_col, -1)
+
+        # "KICK" label on hit
+        if is_hit:
+            cv2.putText(image, "KICK", (px[0] - 20, px[1] - 28),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 200, 255), 2)
+
+        if self.show_coords:
+            cv2.putText(
+                image,
+                f"FOOT:{dbg['state']} spd:{dbg['debug_speed']:.3f}",
+                (px[0] - 50, px[1] + 40),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 180, 255), 1,
             )
 
     def _draw_drums(self, image, cur_time):
@@ -603,29 +653,44 @@ class ARDrumApp:
 
     # ── POV canvas ────────────────────────────────────────────────────────────
 
-    def _render_pov_canvas(self, dbg_l, dbg_r, cur_time, w_lm=None):
+    def _render_pov_canvas(self, dbg_l, dbg_r, dbg_foot, cur_time, w_lm=None):
         canvas = np.full((_POV_REN_H, _POV_REN_W, 3), (8, 10, 18), dtype=np.uint8)
 
         SCALE     = 170
         cx_c      = _POV_REN_W // 2
-        cy_c      = (_POV_REN_H // 2) + 80
+        cy_c      = (_POV_REN_H // 2) - 100  # Shift horizon up to make room for the floor
+        
         CAM_X     = 0.0
-        CAM_Y     = 0.55
-        CAM_Z     = -0.05
+        CAM_Y     = 0.85  # Move camera higher up (sitting taller)
+        CAM_Z     = 0.0   
+
+        # Tilt camera DOWN by 22 degrees to see the floor and bass drum
+        PITCH     = math.radians(22)
+        cos_p     = math.cos(PITCH)
+        sin_p     = math.sin(PITCH)
 
         def project(x, y, z):
-            x += CAM_X; y += CAM_Y; z += CAM_Z
-            dist = max(abs(z), 0.1)
+            # 1. Translate world relative to camera
+            x += CAM_X
+            y += CAM_Y
+            z += CAM_Z
+            
+            # 2. Rotate world around X-axis (Pitch)
+            y_rot = y * cos_p + z * sin_p
+            z_rot = z * cos_p - y * sin_p
+            
+            dist = max(abs(z_rot), 0.1)
             px   = int(cx_c + (x / dist) * SCALE)
-            py   = int(cy_c + (y / dist) * SCALE)
-            return px, py, z, dist
+            py   = int(cy_c + (y_rot / dist) * SCALE)
+            return px, py, z_rot, dist
 
         rq = []
 
-        # Grid
+        # Grid (moved down to Y = 0.65 to act as a true floor beneath the pedal)
         XS = [-1.1, -0.7, -0.28, 0, 0.28, 0.7, 1.1]
-        ZS = [-0.35, -0.55, -0.75, -0.95, -1.15]
-        GRID_Y = 0.08
+        ZS = [-0.15, -0.35, -0.55, -0.75, -0.95, -1.15]
+        GRID_Y = 0.65
+        
         for gx in XS:
             p1 = project(gx, GRID_Y, ZS[0]);  p2 = project(gx, GRID_Y, ZS[-1])
             rq.append({"t":"line","depth":(p1[2]+p2[2])/2,"p1":p1[:2],"p2":p2[:2],"color":(30,42,58),"w":1})
@@ -633,31 +698,38 @@ class ARDrumApp:
             p1 = project(XS[0], GRID_Y, gz);  p2 = project(XS[-1], GRID_Y, gz)
             rq.append({"t":"line","depth":(p1[2]+p2[2])/2,"p1":p1[:2],"p2":p2[:2],"color":(30,42,58),"w":1})
 
-        # Drums
+            # ── Drums ─────────────────────────────────────────────────────────
         for name, props in self.kit.drums.items():
             cx, cy, cz   = props["center"]
             is_hit = (
                 cur_time - self.kit.last_hit_time["L"].get(name, 0) < 0.20 or
-                cur_time - self.kit.last_hit_time["R"].get(name, 0) < 0.20
+                cur_time - self.kit.last_hit_time["R"].get(name, 0) < 0.20 or
+                cur_time - self.kit.last_hit_time["RF"].get(name, 0) < 0.20
             )
             col = (0, 240, 60) if is_hit else props["color_idle"]
             ppx, ppy, depth, dist = project(cx, cy, cz)
             rx_m, ry_m, rz_m = props["radii"]
-            
-            # 1. Decouple visual thickness from hit-detection depth (rz_m)
-            # Make cymbals/hi-hats thin (2cm) and standard drums thicker (12cm)
-            visual_thickness_m = 0.02 if "Cymbal" in name or "Hi-Hat" in name else 0.12
-            
-            rx    = max(int((rx_m * SCALE) / dist), 4)
-            ry    = max(int((ry_m * SCALE) / dist), 2)
-            
-            # 2. Use the new visual thickness to calculate pixels, instead of rz_m
-            thick = max(int((visual_thickness_m * SCALE) / dist), 2)
-            
-            rq.append({"t":"drum","depth":depth,"name":name,
-                       "px":ppx,"py":ppy,"rx":rx,"ry":ry,"thick":thick,"col":col})
 
-        # Arms
+            if name == "Bass Drum":
+                visual_thickness_m = 0.20
+                # Bass drum faces the camera (standing circle)
+                # Its vertical radius is slightly compressed by the 22-degree downward camera pitch
+                rx    = max(int((rx_m * SCALE) / dist), 4)
+                ry    = max(int((rx_m * cos_p * SCALE) / dist), 4)
+                thick = max(int((visual_thickness_m * SCALE) / dist), 2)
+
+                rq.append({"t":"bass_drum","depth":depth,"name":"BD",
+                        "px":ppx,"py":ppy,"rx":rx,"ry":ry,"thick":thick,"col":col})
+            else:
+                visual_thickness_m = 0.02 if "Cymbal" in name or "Hi-Hat" in name else 0.12
+                rx    = max(int((rx_m * SCALE) / dist), 4)
+                ry    = max(int((ry_m * SCALE) / dist), 2)
+                thick = max(int((visual_thickness_m * SCALE) / dist), 2)
+
+                rq.append({"t":"drum","depth":depth,"name":name[:3].upper(),
+                        "px":ppx,"py":ppy,"rx":rx,"ry":ry,"thick":thick,"col":col})
+
+        # ── Arms ─────────────────────────────────────────────────────────
         sw = self.fixed_sw_m
         if w_lm and sw > 0:
             arm_defs = [
@@ -698,11 +770,49 @@ class ARDrumApp:
                 rq.append({"t":"hand","depth":wr_p[2],"px":wr_p[0],"py":wr_p[1],
                            "col":wrist_col,"state":dbg.get("state",""),"r":rad_wr})
 
+        
+        # ── Depth-sort and render ─────────────────────────────────────────
         rq.sort(key=lambda i: i["depth"])
         for item in rq:
             t = item["t"]
-            if   t == "line": cv2.line(canvas, item["p1"], item["p2"], item["color"], item["w"])
-            elif t == "dot":  cv2.circle(canvas, (item["px"],item["py"]), item["r"], item["col"], -1)
+            if   t == "line":
+                cv2.line(canvas, item["p1"], item["p2"], item["color"], item["w"])
+            elif t == "dot":
+                cv2.circle(canvas, (item["px"],item["py"]), item["r"], item["col"], -1)
+
+            elif t == "bass_drum":
+                ppx, ppy = item["px"], item["py"]
+                rx, ry, thick, c = item["rx"], item["ry"], item["thick"], item["col"]
+                
+                shade = (int(c[0]*0.4), int(c[1]*0.4), int(c[2]*0.4))
+                
+                # Because the camera tilts down, the back of the standing drum appears higher on screen
+                back_y = ppy - thick
+                
+                # Draw Back face
+                cv2.ellipse(canvas, (ppx, back_y), (rx, ry), 0, 0, 360, shade, -1)
+                
+                # Draw Shell (connects left and right edges backwards)
+                pts = np.array([
+                    (ppx - rx, ppy), (ppx + rx, ppy),
+                    (ppx + rx, back_y), (ppx - rx, back_y)
+                ], dtype=np.int32)
+                cv2.fillPoly(canvas, [pts], shade)
+                
+                # Draw Front face (Drum head)
+                # Flashes slightly brighter green/white when hit
+                head_col = (200, 255, 200) if c == (0, 240, 60) else (170, 170, 170)
+                cv2.ellipse(canvas, (ppx, ppy), (rx, ry), 0, 0, 360, head_col, -1)
+                
+                # Draw colored rim
+                cv2.ellipse(canvas, (ppx, ppy), (rx, ry), 0, 0, 360, c, max(3, int(rx*0.15)))
+                cv2.ellipse(canvas, (ppx, ppy), (rx + 2, ry + 2), 0, 0, 360, (40, 40, 40), 1)
+
+                # Draw Label
+                lbl = item["name"]
+                ts  = cv2.getTextSize(lbl, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)[0]
+                cv2.putText(canvas, lbl, (ppx - ts[0]//2, ppy + ts[1]//2), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0,0,0), 3)
+                cv2.putText(canvas, lbl, (ppx - ts[0]//2, ppy + ts[1]//2), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255,255,255), 1)
             elif t == "drum":
                 ppx,ppy = item["px"],item["py"]
                 rx,ry,thick,c = item["rx"],item["ry"],item["thick"],item["col"]
@@ -712,7 +822,7 @@ class ARDrumApp:
                 cv2.fillPoly(canvas,[pts],shade)
                 cv2.ellipse(canvas,(ppx,ppy),(rx,ry),0,0,360,c,-1)
                 cv2.ellipse(canvas,(ppx,ppy),(rx,ry),0,0,360,(170,170,170),1)
-                lbl = item["name"][:3].upper()
+                lbl = item["name"]
                 ts  = cv2.getTextSize(lbl,cv2.FONT_HERSHEY_SIMPLEX,0.48,1)[0]
                 cv2.putText(canvas,lbl,(ppx-ts[0]//2,ppy+ts[1]//2),cv2.FONT_HERSHEY_SIMPLEX,0.48,(0,0,0),3)
                 cv2.putText(canvas,lbl,(ppx-ts[0]//2,ppy+ts[1]//2),cv2.FONT_HERSHEY_SIMPLEX,0.48,(255,255,255),1)
@@ -722,12 +832,21 @@ class ARDrumApp:
                 cv2.circle(canvas,(ppx,ppy),r,c,-1)
                 cv2.circle(canvas,(ppx,ppy),r,(255,255,255),1)
 
+        # ── Overlay labels ────────────────────────────────────────────────
         if self.depth_active and self.depth_anything_loaded:
             cv2.putText(canvas, "DEPTH-ANYTHING ON", (12, _POV_REN_H - 10),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 220, 120), 1)
 
         cv2.putText(canvas, "TRUE 1ST PERSON POV", (12, 22),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 210, 210), 1)
+
+        # Bass drum state indicator in POV corner
+        if dbg_foot is not None:
+            foot_label = f"KICK: {dbg_foot.get('state','UP')}"
+            foot_col   = (0, 200, 255) if dbg_foot.get("state") == "DOWN" else (80, 80, 100)
+            cv2.putText(canvas, foot_label, (_POV_REN_W - 160, 22),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.50, foot_col, 1)
+
         return canvas
 
     # ── Entry point ───────────────────────────────────────────────────────────
