@@ -84,6 +84,8 @@ class ARDrumApp:
             success, image = self.cap.read()
             if not success: continue
             image = cv2.flip(image, 1)
+            filtered_image = cv2.Laplacian(image, cv2.CV_16S, ksize=3)
+            image = cv2.subtract(image,filtered_image)
             try:
                 self.frame_queue.get_nowait()  # drain stale frame
             except queue.Empty:
