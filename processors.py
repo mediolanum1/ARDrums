@@ -19,13 +19,15 @@ class GestureWristProcessor:
         self.state = UP
         self.state_change_frame = 0
         self.last_hit_time = 0
-        
+       # In processors.py __init__ — one new threshold
+        self.MIN_ARM_EXTENSION_M = 0.35  # tweak: ~28 cm shoulder-to-wrist minimum 
         self.prev_wrist_px = None
         self.prev_3d_coords = None
         self.z_smooth = 0.0  # in __init__
         self.smooth_norm_speed = 0.0
+        self.WORLD_Y_STRIKE_THRESHOLD = 0.008   # ~8mm downward in world metres
 
-    def process(self, w_scr, w_wrl, sh_scr, sh_wrl, el_scr, sw_m, kit, cur_time_ms, frame_dims, other_sh_scr, flow_vector=None):
+    def process(self, w_scr, w_wrl, sh_scr, sh_wrl, el_scr, sw_m, kit, cur_time_ms, frame_dims, other_sh_scr):
         w, h = frame_dims
         wrist_px = (w_scr.x * w, w_scr.y * h)
 
@@ -46,34 +48,17 @@ class GestureWristProcessor:
         norm_dx = 0.0
         norm_dy = 0.0
         raw_norm_speed = 0.0
-        flow_norm_dx = 0.0
-        flow_norm_dy = 0.0
-        flow_norm_speed = 0.0
-
         if self.prev_wrist_px is not None:
             dx = wrist_px[0] - self.prev_wrist_px[0]
             dy = wrist_px[1] - self.prev_wrist_px[1]
             norm_dx = dx / current_sw_px
             norm_dy = dy / current_sw_px
             raw_norm_speed = math.hypot(norm_dx, norm_dy)
+            self.smooth_norm_speed = (self.smooth_norm_speed * 0.3) + (raw_norm_speed * 0.7)
 
-        if flow_vector is not None:
-            flow_norm_dx = flow_vector[0] / current_sw_px
-            flow_norm_dy = flow_vector[1] / current_sw_px
-            flow_norm_speed = math.hypot(flow_norm_dx, flow_norm_dy)
-
-        combined_norm_dx = norm_dx
-        combined_norm_dy = norm_dy
-        if flow_vector is not None:
-            combined_norm_dx = 0.5 * norm_dx + 0.5 * flow_norm_dx
-            combined_norm_dy = 0.5 * norm_dy + 0.5 * flow_norm_dy
-
-        motion_norm_speed = math.hypot(combined_norm_dx, combined_norm_dy)
-        self.smooth_norm_speed = (self.smooth_norm_speed * 0.3) + (motion_norm_speed * 0.7)
-
-        downward_motion   = combined_norm_dy
-        horizontal_motion = abs(combined_norm_dx)
-        upward_motion     = combined_norm_dy
+        downward_motion   = norm_dy
+        horizontal_motion = abs(norm_dx)
+        upward_motion     = norm_dy
 
         # ── State machine ─────────────────────────────────────────────────────
         hit_detected = None
@@ -91,16 +76,33 @@ class GestureWristProcessor:
                 self.state_change_frame = 0
 
         elif self.state == DOWN:
+        #    if (self.smooth_norm_speed > SPEED_THRESHOLD and
+        #            self.prev_3d_coords is not None and
+        #            downward_motion > 0 and
+        #            (cur_time_ms - self.last_hit_time) > COOLDOWN_MS):
+# AFTER — add world-space Y displacement gate
+
+            world_y_delta = curr_3d_coords[1] - self.prev_3d_coords[1]
+            sw_dist = math.sqrt(
+                (curr_3d_coords[0] - sh_wrl.x) ** 2 +
+                (curr_3d_coords[1] - sh_wrl.y) ** 2 +
+                (curr_3d_coords[2] - sh_wrl.z) ** 2
+            )
+
             if (self.smooth_norm_speed > SPEED_THRESHOLD and
                     self.prev_3d_coords is not None and
                     downward_motion > 0 and
+                    world_y_delta > self.WORLD_Y_STRIKE_THRESHOLD and   # <-- new gate
+                    sw_dist > self.MIN_ARM_EXTENSION_M and    
                     (cur_time_ms - self.last_hit_time) > COOLDOWN_MS):
-
                 hit_detected = kit.check_line_intersection(
                     self.prev_3d_coords,
                     curr_3d_coords,
                     cur_time_ms / 1000.0,
-                    self.smooth_norm_speed
+                    self.smooth_norm_speed,
+                    self.prev_wrist_px,   # screen pixels, previous frame
+                    wrist_px,         # screen pixels, current frame
+                    self.label
                 )
 
                 if hit_detected:

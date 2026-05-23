@@ -4,71 +4,116 @@ import pygame
 
 class VirtualDrumKit:
     def __init__(self):
-        self.last_hit_time = {}
-        self.hit_cooldown = 0.2
-
-        # --- Global cooldown: after ANY drum is hit, ALL drums are locked ---
-   
   
-        # ── Stick mode ────────────────────────────────────────────────────────
+        self.hit_cooldown     = 0.15
         self.use_sticks       = False
         self.active_stick_ext = (0.0, 0.0, 0.0)
-
+        self.pixel_positions  = {}
+        self.last_hit_time = {"L": {}, "R": {}}
         pygame.mixer.pre_init(frequency=44100, size=-16, channels=2, buffer=512)
         pygame.init()
         pygame.mixer.set_num_channels(16)
 
-        # ── Kit layout in TRUE METERS ─────────────────────────────────────────
-        # Origin (0,0,0) : Midpoint between your hips
-        # X : Left (-) / Right (+)
-        # Y : Up (-) / Down (+)  [Shoulders are roughly Y = -0.5m]
-        # Z : Forward (-) / Back (+) [Fully extended arm is ~ -0.6m]
-        # 
-        # "radii": (X_radius_m, Y_radius_m, Z_half_thickness_m)
-        # This replaces the old "squash" hack. Visuals and hitboxes are now 1:1.
         self.drums = {
-            "Snare":        {"center": (0.0,  -0.15, -0.3), "radii": (0.16, 0.07, 0.5), "color_idle": (200, 200, 200), "sound_path": "sounds/Snare Sample.mp3"},
-           # "Hi-Hat":       {"center": (-0.35, -0.25, -0.3), "radii": (0.15, 0.06, 0.08), "color_idle": (0, 200, 255), "sound_path": "sounds/HI-HAT Top Sample.mp3"},
-           ## "High Tom":     {"center": (-0.15, -0.35, -0.35), "radii": (0.14, 0.06, 0.12), "color_idle": (255, 100, 100), "sound_path": "sounds/High Tom Sample.mp3"},
-            #"Mid Tom":      {"center": (0.15,  -0.35, -0.35), "radii": (0.14, 0.06, 0.12), "color_idle": (255, 100, 100), "sound_path": "sounds/Middle Tom Sample.mp3"},
-            #"Ride Cymbal":  {"center": (0.45,  -0.30, -0.3), "radii": (0.20, 0.07, 0.08), "color_idle": (0, 215, 255), "sound_path": "sounds/Ride Cymbal Edge Sample.mp3"},
-            #"Crash Cymbal": {"center": (-0.25, -0.55, -0.37), "radii": (0.20, 0.07, 0.08), "color_idle": (0, 215, 255), "sound_path": "sounds/High Crash Cymbal Sample.mp3"}
+            "Snare":        {"center": ( 0.0,  -0.10, -0.33), "radii": (0.16, 0.07, 0.10), "color_idle": (200, 200, 200), "sound_path": "sounds/Snare Sample.mp3"},
+            "Hi-Hat":       {"center": (-0.44, -0.28, -0.32), "radii": (0.15, 0.06, 0.12), "color_idle": (0,   200, 255), "sound_path": "sounds/HI-HAT Top Sample.mp3"},
+            "High Tom":     {"center": (-0.15, -0.35, -0.49), "radii": (0.14, 0.06, 0.8), "color_idle": (255, 100, 100), "sound_path": "sounds/High Tom Sample.mp3"},
+            "Mid Tom":      {"center": ( 0.15, -0.35, -0.49), "radii": (0.14, 0.06, 0.8), "color_idle": (255, 100, 100), "sound_path": "sounds/Middle Tom Sample.mp3"},
+            "Ride Cymbal":  {"center": ( 0.55, -0.40, -0.38), "radii": (0.20, 0.07, 0.06), "color_idle": (0,   215, 255), "sound_path": "sounds/Ride Cymbal Edge Sample.mp3"},
+            "Crash Cymbal": {"center": (-0.30, -0.60, -0.45), "radii": (0.20, 0.07, 0.06), "color_idle": (0,   215, 255), "sound_path": "sounds/High Crash Cymbal Sample.mp3"},
         }
 
         self.loaded_sounds = {}
         for drum_name, props in self.drums.items():
-            self.last_hit_time[drum_name] = 0.0
+            self.last_hit_time["L"][drum_name] = 0.0
+            self.last_hit_time["R"][drum_name] = 0.0
             path = props["sound_path"]
             if os.path.exists(path):
                 self.loaded_sounds[drum_name] = pygame.mixer.Sound(path)
             else:
                 print(f"WARNING: Missing audio file -> {path}")
 
-    def check_line_intersection(self, p_prev, p_curr, cur_time, smooth_norm_speed):
+    @staticmethod
+    def _segment_hits_ellipse(px0, py0, px1, py1, cx, cy, rx, ry):
+        """
+        Returns True if the line segment (px0,py0)->(px1,py1)
+        intersects or is contained within the ellipse.
+
+        Substitutes the parametric line x(t) = px0 + t*dx,
+        y(t) = py0 + t*dy into the ellipse equation, producing
+        a quadratic in t. The segment hits the ellipse when the
+        [t1, t2] solution interval overlaps [0, 1].
+        """
+        dx = px1 - px0
+        dy = py1 - py0
+        fx = px0 - cx
+        fy = py0 - cy
+
+        a = (dx / rx) ** 2 + (dy / ry) ** 2
+
+        if a < 1e-10:
+            # Degenerate: no movement between frames — point test
+            return (fx / rx) ** 2 + (fy / ry) ** 2 <= 1
+
+        b    = 2 * (fx * dx / rx ** 2 + fy * dy / ry ** 2)
+        c    = (fx / rx) ** 2 + (fy / ry) ** 2 - 1
+        disc = b ** 2 - 4 * a * c
+
+        if disc < 0:
+            return False  # line misses ellipse entirely
+
+        sqrt_disc = math.sqrt(disc)
+        t1 = (-b - sqrt_disc) / (2 * a)  # entry
+        t2 = (-b + sqrt_disc) / (2 * a)  # exit
+
+        # Segment overlaps ellipse when [t1, t2] overlaps [0, 1]
+        return t1 <= 1.0 and t2 >= 0.0
+
+    def check_line_intersection(self, p_prev, p_curr, cur_time, smooth_norm_speed,
+                                 px_prev, px_curr, hand_id="R"):
+        x0, y0, z0 = p_prev
+        x1, y1, z1 = p_curr
+
+        if self.use_sticks:
+            ex, ey, ez = self.active_stick_ext
+            x0 += ex; y0 += ey; z0 += ez
+            x1 += ex; y1 += ey; z1 += ez
+
         for drum_name, props in self.drums.items():
+            if cur_time - self.last_hit_time[hand_id][drum_name] <= self.hit_cooldown:
+                continue
+
+            pos = self.pixel_positions.get(drum_name)
+            if pos is None:
+                continue
+
             cz = props["center"][2]
             rz = props["radii"][2]
-            z0, z1 = p_prev[2], p_curr[2]
-            # Did the segment cross the Z slab?
-            if not ((z0 <= cz + rz and z1 >= cz - rz) or 
-                    (z1 <= cz + rz and z0 >= cz - rz)):
+
+            # Z slab gate — same as before
+            if z0 < cz - rz and z1 < cz - rz:
                 continue
-            # Interpolate position at the crossing point
-            t = (cz - z0) / (z1 - z0) if z1 != z0 else 0.5
-            xi = p_prev[0] + t * (p_curr[0] - p_prev[0])
-            yi = p_prev[1] + t * (p_curr[1] - p_prev[1])
-            cx, cy, _ = props["center"]
-            rx, ry, _ = props["radii"]
-            if (xi - cx)**2 / rx**2 + (yi - cy)**2 / ry**2 <= 1:
-                # cooldown check + play sound
-                if cur_time - self.last_hit_time[drum_name] > self.hit_cooldown:
-                    self.last_hit_time[drum_name] = cur_time
-                  
-                    if drum_name in self.loaded_sounds: 
-                        sound = self.loaded_sounds[drum_name]
-                        sound.set_volume(min(1.0, smooth_norm_speed * 8))
-                        sound.play()
-                    return drum_name
+            if z0 > cz + rz and z1 > cz + rz:
+                continue
+
+            cx = pos["cx"];  cy = pos["cy"]
+            rx = pos["rx"];  ry = pos["ry"]
+
+            if rx <= 0 or ry <= 0:
+                continue
+
+            # 2D line segment vs ellipse — catches grazing strikes too
+            if self._segment_hits_ellipse(
+                px_prev[0], px_prev[1],
+                px_curr[0], px_curr[1],
+                cx, cy, rx, ry
+            ):
+                self.last_hit_time[hand_id][drum_name] = cur_time
+                if drum_name in self.loaded_sounds:
+                    sound = self.loaded_sounds[drum_name]
+                    sound.set_volume(min(1.0, smooth_norm_speed * 8))
+                    sound.play()
+                return drum_name
 
         return None
 
