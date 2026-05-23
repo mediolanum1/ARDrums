@@ -20,7 +20,7 @@ class GestureWristProcessor:
         self.state_change_frame = 0
         self.last_hit_time = 0
        # In processors.py __init__ — one new threshold
-        self.MIN_ARM_EXTENSION_M = 0.35  # tweak: ~28 cm shoulder-to-wrist minimum 
+        self.MIN_ARM_EXTENSION_M = 0.28  # tweak: ~28 cm shoulder-to-wrist minimum 
         self.prev_wrist_px = None
         self.prev_3d_coords = None
         self.z_smooth = 0.0  # in __init__

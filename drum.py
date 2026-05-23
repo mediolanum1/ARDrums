@@ -15,10 +15,10 @@ class VirtualDrumKit:
         pygame.mixer.set_num_channels(16)
 
         self.drums = {
-            "Snare":        {"center": ( 0.0,  -0.10, -0.33), "radii": (0.16, 0.07, 0.10), "color_idle": (200, 200, 200), "sound_path": "sounds/Snare Sample.mp3"},
-            "Hi-Hat":       {"center": (-0.44, -0.28, -0.32), "radii": (0.15, 0.06, 0.12), "color_idle": (0,   200, 255), "sound_path": "sounds/HI-HAT Top Sample.mp3"},
-            "High Tom":     {"center": (-0.15, -0.35, -0.49), "radii": (0.14, 0.06, 0.8), "color_idle": (255, 100, 100), "sound_path": "sounds/High Tom Sample.mp3"},
-            "Mid Tom":      {"center": ( 0.15, -0.35, -0.49), "radii": (0.14, 0.06, 0.8), "color_idle": (255, 100, 100), "sound_path": "sounds/Middle Tom Sample.mp3"},
+            "Snare":        {"center": ( 0.0,  -0.10, -0.33), "radii": (0.16, 0.07, 0.06), "color_idle": (200, 200, 200), "sound_path": "sounds/Snare Sample.mp3"},
+            "Hi-Hat":       {"center": (-0.44, -0.28, -0.32), "radii": (0.15, 0.06, 0.06), "color_idle": (0,   200, 255), "sound_path": "sounds/HI-HAT Top Sample.mp3"},
+            "High Tom":     {"center": (-0.15, -0.35, -0.49), "radii": (0.14, 0.06, 0.06), "color_idle": (255, 100, 100), "sound_path": "sounds/High Tom Sample.mp3"},
+            "Mid Tom":      {"center": ( 0.15, -0.35, -0.49), "radii": (0.14, 0.06, 0.06), "color_idle": (255, 100, 100), "sound_path": "sounds/Middle Tom Sample.mp3"},
             "Ride Cymbal":  {"center": ( 0.55, -0.40, -0.38), "radii": (0.20, 0.07, 0.06), "color_idle": (0,   215, 255), "sound_path": "sounds/Ride Cymbal Edge Sample.mp3"},
             "Crash Cymbal": {"center": (-0.30, -0.60, -0.45), "radii": (0.20, 0.07, 0.06), "color_idle": (0,   215, 255), "sound_path": "sounds/High Crash Cymbal Sample.mp3"},
         }

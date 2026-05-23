@@ -21,7 +21,7 @@ import os
 import pygame
 
 import torch
-from processors import GestureWristProcessor
+from processors1 import GestureWristProcessor
 from stats_collector import StatsCollector
 import numpy as np
 from drum import VirtualDrumKit
@@ -46,7 +46,7 @@ _DEPTH_SIGN = 1.0   # do not change — matches MediaPipe's sign convention
 # ──────────────────────────────────────────────────────────────────────────────
 
 
-APP_H     = 820
+APP_H     = 950
 RIGHT_W   = 640
 POV_H     = 540
 WIN_NAME  = "AR Drum Kit"
@@ -92,14 +92,12 @@ class ARDrumApp:
 
         self.show_drums        = True
         self.show_coords       = False
-        self.show_occlusion    = False
-        self.show_hit_messages = False
         self.show_drum_names   = True
-        self.show_left_state   = False
+    
         self.show_pov          = True
 
-        self.stick_mode   = True
-        self.stick_length = 0
+        self.stick_mode   = False
+        self.stick_length = 0.15
         self._stick_ext_l = (0.0, 0.0, 0.0)
         self._stick_ext_r = (0.0, 0.0, 0.0)
 
@@ -156,8 +154,24 @@ class ARDrumApp:
     def _preprocess(self, frame):
         lab = cv2.cvtColor(frame, cv2.COLOR_BGR2LAB)
         l, a, b = cv2.split(lab)
+        
+        # 1. Apply CLAHE
         l = self._clahe.apply(l)
-        return cv2.cvtColor(cv2.merge([l, a, b]), cv2.COLOR_LAB2BGR)
+        
+        # 2. Blur slightly to avoid sharpening CLAHE's noise
+        blurred_l = cv2.GaussianBlur(l, (3, 3), 0)
+        
+        # 3. Calculate Laplacian (16-bit signed to handle negatives)
+        laplacian = cv2.Laplacian(blurred_l, cv2.CV_16S, ksize=3)
+        
+        # 4. Safely subtract to sharpen (convert 'l' to int16 first)
+        sharpened_l = np.int16(l) - laplacian
+        
+        # 5. Clip values to valid 0-255 range and convert back to uint8
+        l_final = np.clip(sharpened_l, 0, 255).astype(np.uint8)
+        
+        # 6. Reconstruct and return
+        return cv2.cvtColor(cv2.merge([l_final, a, b]), cv2.COLOR_LAB2BGR)
 
     # ── MediaPipe AI thread ───────────────────────────────────────────────────
 
@@ -170,9 +184,12 @@ class ARDrumApp:
         )
         with PoseLandmarker.create_from_options(options) as pose_landmarker:
             while self.running:
-                image = self.frame_queue.get()
-                image = self._preprocess(image)
-                rgb   = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+                raw_image = self.frame_queue.get()
+                
+                # Preprocess a temporary copy of the image to send to MediaPipe
+                processed_image = self._preprocess(raw_image)
+                rgb   = cv2.cvtColor(processed_image, cv2.COLOR_BGR2RGB)
+                
                 ts_ms = int(time.time() * 1000)
                 mp_img = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
                 result = pose_landmarker.detect_for_video(mp_img, ts_ms)
@@ -182,7 +199,9 @@ class ARDrumApp:
                         self.result_queue.get_nowait()
                     except queue.Empty:
                         pass
-                self.result_queue.put((image, result, time.time()))
+                
+                # Crucial Fix: Put the unmodified RAW image back into the rendering queue
+                self.result_queue.put((raw_image, result, time.time()))
 
     # ── Depth Anything V2 thread ──────────────────────────────────────────────
 
@@ -192,15 +211,11 @@ class ARDrumApp:
             device = 'cuda' if torch.cuda.is_available() else 'cpu'
             print(f"[DEPTH] Loading Metric Model on {device} …")
 
-            # Model architecture definition for the Small (vits) variant
             model_configs = {
                 'vits': {'encoder': 'vits', 'features': 64, 'out_channels': [48, 96, 192, 384]}
             }
             
-            # Initialize with max_depth=20 for indoor metric models
             pipe = DepthAnythingV2(**{**model_configs['vits'], 'max_depth': 20})
-            
-            # Load the downloaded metric weights
             pipe.load_state_dict(torch.load('depth_anything_v2_metric_hypersim_vits.pth', map_location='cpu'))
             pipe = pipe.to(device).eval()
 
@@ -216,7 +231,6 @@ class ARDrumApp:
             return None
 
     def depth_thread(self, pipe):
-        """Native PyTorch inference loop for Metric Depth."""
         while self.running:
             try:
                 frame = self._depth_frame_queue.get(timeout=0.1)
@@ -227,42 +241,28 @@ class ARDrumApp:
                 continue
 
             try:
-                # pipe.infer_image returns a 2D numpy array natively scaled in true meters
                 dm = pipe.infer_image(frame)
-
                 with self._depth_lock:
                     self._latest_depth_map = dm
-
             except Exception as exc:
                 print(f"[DEPTH] Inference error: {exc}")
+
     # ── Depth fusion helpers ──────────────────────────────────────────────────
 
     def _depth_at_screen_lm(self, lm, dm):
-        """Look up the depth-map value at a screen landmark's pixel position."""
         px = int(np.clip(lm.x * self.frame_width,  0, self.frame_width  - 1))
         py = int(np.clip(lm.y * self.frame_height, 0, self.frame_height - 1))
         return float(dm[py, px])
 
     def _patch_wlm_with_depth(self, w_lm, s_lm):
-        """Return a list copy of w_lm where the wrist Z values (indices 15, 16)
-        are replaced by depth-map-derived relative depth:
-
-            z_wrist = _DEPTH_SIGN * (depth[wrist_px] - depth[shoulder_px])
-
-        Positive z  → wrist is further from camera than its shoulder (reaching back).
-        Negative z  → wrist is closer to camera than its shoulder (reaching forward).
-
-        If the depth map is not yet available, returns the original list unchanged.
-        """
         with self._depth_lock:
-            dm = self._latest_depth_map  # None or ndarray — no copy needed (read-only use)
+            dm = self._latest_depth_map
 
         if dm is None:
             return list(w_lm)
 
         patched = list(w_lm)
 
-        # Reference plane: average depth of both hips (stable, matches drum anchor)
         l_hip, r_hip = s_lm[23], s_lm[24]
         if l_hip.visibility < 0.4 or r_hip.visibility < 0.4:
             return patched
@@ -270,21 +270,12 @@ class ARDrumApp:
         d_hip = (self._depth_at_screen_lm(l_hip, dm) +
                  self._depth_at_screen_lm(r_hip, dm)) / 2.0
 
-        # Use average of both hips as the depth reference plane.
-        # Hips are more stable than shoulders, barely move during drumming,
-        # and are predicted more reliably by MediaPipe.
         arm_indices = (11, 12, 13, 14, 15, 16)
-        
         for idx in arm_indices:
             if s_lm[idx].visibility < 0.4:
                 continue
-            
-            # This is now returning exact meters from the camera lens
             d_joint = self._depth_at_screen_lm(s_lm[idx], dm)
-            
-            # Subtract the hip depth to get the exact relative depth in meters
             z_new = _DEPTH_SIGN * (d_joint - d_hip) 
-            
             patched[idx] = _LM(w_lm[idx], z=z_new)
 
         return patched
@@ -320,19 +311,14 @@ class ARDrumApp:
                     cur_time_ms = int(time.time() * 1000)
                     dims        = (self.frame_width, self.frame_height)
 
-                    # ── Depth fusion: replace wrist Z if depth mode is on ──
                     if self.depth_active and self.depth_anything_loaded:
                         w_lm_eff = self._patch_wlm_with_depth(w_lm, s_lm)
                     else:
                         w_lm_eff = w_lm
-                    # ─────────────────────────────────────────────────────────
 
                     if self.stick_mode:
-                        self._stick_ext_l = self._compute_stick_ext(w_lm_eff[13], w_lm_eff[15])
-                        self._stick_ext_r = self._compute_stick_ext(w_lm_eff[14], w_lm_eff[16])
-                    else:
-                        self._stick_ext_l = (0.0, 0.0, 0.0)
-                        self._stick_ext_r = (0.0, 0.0, 0.0)
+                        self._draw_stick_ar(image, s_lm[13], s_lm[15], (255, 200, 50), side='l')
+                        self._draw_stick_ar(image, s_lm[14], s_lm[16], (50, 220, 255), side='r')
 
                     self.kit.active_stick_ext = self._stick_ext_l
                     hit_l, dbg_l = self.left_arm.process(
@@ -350,23 +336,14 @@ class ARDrumApp:
                     if hit_l: self.last_l_hit_time = cur_time
                     if hit_r: self.last_r_hit_time = cur_time
 
-                    if self.show_hit_messages:
-                        if cur_time - self.last_l_hit_time < 0.5:
-                            cv2.putText(image, "RIGHT HAND HIT!", (50, 100),
-                                        cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 3)
-                        if cur_time - self.last_r_hit_time < 0.5:
-                            cv2.putText(image, "LEFT HAND HIT!", (self.frame_width - 350, 100),
-                                        cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 3)
-
+                    
                     self._draw_arm_debug(image, dbg_l, (255, 0, 0))
                     self._draw_arm_debug(image, dbg_r, (0, 0, 255))
 
                     if self.stick_mode:
                         self._draw_stick_ar(image, s_lm[13], s_lm[15], (255, 200, 50), side='l')
                         self._draw_stick_ar(image, s_lm[14], s_lm[16], (50, 220, 255), side='r')
-                    else:
-                        self._draw_hand_ext(image, s_lm[13], s_lm[15], (255, 0, 0))
-                        self._draw_hand_ext(image, s_lm[14], s_lm[16], (0, 0, 255))
+
 
                     if self.show_drums and self.cached_drum_positions:
                         self._draw_drums(image, cur_time)
@@ -387,10 +364,7 @@ class ARDrumApp:
             elif key == ord("f"): self.freeze_drums      = not self.freeze_drums
             elif key == ord("d"): self.show_drums        = not self.show_drums
             elif key == ord("c"): self.show_coords       = not self.show_coords
-            elif key == ord("h"): self.show_occlusion    = not self.show_occlusion
-            elif key == ord("j"): self.show_hit_messages = not self.show_hit_messages
             elif key == ord("n"): self.show_drum_names   = not self.show_drum_names
-            elif key == ord("y"): self.show_left_state   = not self.show_left_state
             elif key == ord("p"): self.show_pov          = not self.show_pov
             elif key == ord("s"):
                 self.stick_mode     = not self.stick_mode
@@ -402,8 +376,6 @@ class ARDrumApp:
                 elif self._depth_status_msg.startswith("Loading"):
                     print("[DEPTH] Still loading, please wait…")
                 else:
-                    # Load on the main thread (torch segfaults if init'd from a daemon thread),
-                    # then hand the ready pipe to the inference daemon thread.
                     pipe = self._load_depth_model()
                     if pipe is not None:
                         threading.Thread(target=self.depth_thread, args=(pipe,), daemon=True).start()
@@ -442,9 +414,8 @@ class ARDrumApp:
         cv2.rectangle(panel, (0, 0), (w, 32), (24, 28, 42), -1)
         cv2.putText(panel, "CONTROLS", (14, 22), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 210, 210), 1)
 
-        # Depth anything status label (shown next to [Z] entry)
         if not USE_DEPTH_ANYTHING and not self.depth_anything_loaded:
-            depth_state = None        # model not loaded at all — dim the entry
+            depth_state = None
             depth_label = "DepthAnyV2 (disabled)"
         elif self._depth_status_msg.startswith("Loading"):
             depth_state = None
@@ -462,11 +433,8 @@ class ARDrumApp:
             ("[P]",   "POV window",     self.show_pov),
             ("[S]",   "Stick mode",     self.stick_mode),
             ("[C]",   "Coords overlay", self.show_coords),
-            ("[H]",   "Occlusion ring", self.show_occlusion),
-            ("[J]",   "Hit messages",   self.show_hit_messages),
-            ("[Y]",   "Left-arm state", self.show_left_state),
             ("[F]",   "Freeze drums",   self.freeze_drums),
-            ("[Q]",   depth_label,      depth_state),     # ← depth toggle
+            ("[Q]",   depth_label,      depth_state),
             ("[ESC]", "Quit",           None),
         ]
 
@@ -486,7 +454,6 @@ class ARDrumApp:
                 lbl = "ON" if state else "off"
                 cv2.putText(panel, lbl, (dot_x - 26, y), cv2.FONT_HERSHEY_SIMPLEX, 0.38, dot_col, 1)
 
-        # Hit flash
         base_y = h - 18
         if dbg_l and (cur_time - self.last_l_hit_time) < 0.4:
             cv2.putText(panel, "LEFT  HIT!", (14, base_y),
@@ -495,7 +462,6 @@ class ARDrumApp:
             cv2.putText(panel, "RIGHT HIT!", (w // 2 + 10, base_y),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 255, 120), 2)
 
-        # Depth status banner at very bottom
         if self._depth_status_msg:
             col = (0, 200, 100) if self.depth_active else (120, 120, 140)
             cv2.putText(panel, self._depth_status_msg, (10, h - 4),
@@ -601,21 +567,7 @@ class ARDrumApp:
         cv2.line(image, wr, tip, color, 4)
         cv2.circle(image, tip, 7, (255, 240, 80), -1)
 
-    def _draw_hand_ext(self, image, elbow_s, wrist_s, color):
-        W, H = self.frame_width, self.frame_height
-        ew   = (int(elbow_s.x * W), int(elbow_s.y * H))
-        wr   = (int(wrist_s.x * W), int(wrist_s.y * H))
-        dx   = wr[0] - ew[0]
-        dy   = wr[1] - ew[1]
-        arm_len_px = math.hypot(dx, dy)
-        if arm_len_px < 1: return
-        hand_px_len = self.metric_to_px_scale * 0.15
-        tip = (
-            int(wr[0] + (dx / arm_len_px) * hand_px_len),
-            int(wr[1] + (dy / arm_len_px) * hand_px_len),
-        )
-        cv2.line(image, wr, tip, color, 3)
-        cv2.circle(image, tip, 5, color, -1)
+    
 
     def _draw_arm_debug(self, image, dbg, color):
         px = dbg["pos_px"]
@@ -691,9 +643,17 @@ class ARDrumApp:
             col = (0, 240, 60) if is_hit else props["color_idle"]
             ppx, ppy, depth, dist = project(cx, cy, cz)
             rx_m, ry_m, rz_m = props["radii"]
+            
+            # 1. Decouple visual thickness from hit-detection depth (rz_m)
+            # Make cymbals/hi-hats thin (2cm) and standard drums thicker (12cm)
+            visual_thickness_m = 0.02 if "Cymbal" in name or "Hi-Hat" in name else 0.12
+            
             rx    = max(int((rx_m * SCALE) / dist), 4)
             ry    = max(int((ry_m * SCALE) / dist), 2)
-            thick = max(int((rz_m * 2 * SCALE) / dist), 2)
+            
+            # 2. Use the new visual thickness to calculate pixels, instead of rz_m
+            thick = max(int((visual_thickness_m * SCALE) / dist), 2)
+            
             rq.append({"t":"drum","depth":depth,"name":name,
                        "px":ppx,"py":ppy,"rx":rx,"ry":ry,"thick":thick,"col":col})
 
@@ -731,16 +691,6 @@ class ARDrumApp:
                     tip_r   = max(2, int(10 / tp_p[3]))
                     rq.append({"t":"line","depth":(wr_p[2]+tp_p[2])/2,"p1":wr_p[:2],"p2":tp_p[:2],"color":(255,220,50),"w":stick_w})
                     rq.append({"t":"dot","depth":tp_p[2],"px":tp_p[0],"py":tp_p[1],"col":(255,220,50),"r":tip_r})
-                elif not self.stick_mode and fw_mag > 1e-3:
-                    hand_len = 0.15
-                    htip3 = (wr3[0]+(fw_x/fw_mag)*hand_len,
-                             wr3[1]+(fw_y/fw_mag)*hand_len,
-                             wr3[2]+(fw_z/fw_mag)*hand_len)
-                    htp_p  = project(*htip3)
-                    hand_w = max(1, int(5 / htp_p[3]))
-                    hand_r = max(2, int(6 / htp_p[3]))
-                    rq.append({"t":"line","depth":(wr_p[2]+htp_p[2])/2,"p1":wr_p[:2],"p2":htp_p[:2],"color":arm_col,"w":hand_w})
-                    rq.append({"t":"dot","depth":htp_p[2],"px":htp_p[0],"py":htp_p[1],"col":arm_col,"r":hand_r})
 
                 is_hit_wrist = dbg.get("hit", False)
                 wrist_col    = (0, 255, 60) if is_hit_wrist else arm_col
@@ -772,7 +722,6 @@ class ARDrumApp:
                 cv2.circle(canvas,(ppx,ppy),r,c,-1)
                 cv2.circle(canvas,(ppx,ppy),r,(255,255,255),1)
 
-        # Depth mode indicator overlay in POV
         if self.depth_active and self.depth_anything_loaded:
             cv2.putText(canvas, "DEPTH-ANYTHING ON", (12, _POV_REN_H - 10),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 220, 120), 1)
@@ -792,7 +741,7 @@ class ARDrumApp:
             if pipe is not None:
                 threading.Thread(target=self.depth_thread, args=(pipe,), daemon=True).start()
         else:
-            self._depth_status_msg = ""  # clean — not advertised in UI
+            self._depth_status_msg = ""
 
         self.main_render_loop()
         self.cap.release()

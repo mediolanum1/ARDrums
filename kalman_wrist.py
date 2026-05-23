@@ -61,7 +61,7 @@ class WristKalman:
         # Higher value → filter trusts measurements less (smoother, more lag).
         # Z gets a larger value because MediaPipe's depth estimate is noisier.
         R = np.eye(3, dtype=np.float32) * measurement_noise
-        R[2, 2] = measurement_noise * 4      # extra distrust for Z
+        R[2, 2] = measurement_noise * 5      # extra distrust for Z
         self._kf.measurementNoiseCov = R
 
         # ── Initial error covariance  P ───────────────────────────────────
