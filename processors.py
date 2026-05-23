@@ -25,7 +25,7 @@ class GestureWristProcessor:
         self.z_smooth = 0.0  # in __init__
         self.smooth_norm_speed = 0.0
 
-    def process(self, w_scr, w_wrl, sh_scr, sh_wrl, el_scr, sw_m, kit, cur_time_ms, frame_dims, other_sh_scr):
+    def process(self, w_scr, w_wrl, sh_scr, sh_wrl, el_scr, sw_m, kit, cur_time_ms, frame_dims, other_sh_scr, flow_vector=None):
         w, h = frame_dims
         wrist_px = (w_scr.x * w, w_scr.y * h)
 
@@ -46,17 +46,34 @@ class GestureWristProcessor:
         norm_dx = 0.0
         norm_dy = 0.0
         raw_norm_speed = 0.0
+        flow_norm_dx = 0.0
+        flow_norm_dy = 0.0
+        flow_norm_speed = 0.0
+
         if self.prev_wrist_px is not None:
             dx = wrist_px[0] - self.prev_wrist_px[0]
             dy = wrist_px[1] - self.prev_wrist_px[1]
             norm_dx = dx / current_sw_px
             norm_dy = dy / current_sw_px
             raw_norm_speed = math.hypot(norm_dx, norm_dy)
-            self.smooth_norm_speed = (self.smooth_norm_speed * 0.3) + (raw_norm_speed * 0.7)
 
-        downward_motion   = norm_dy
-        horizontal_motion = abs(norm_dx)
-        upward_motion     = norm_dy
+        if flow_vector is not None:
+            flow_norm_dx = flow_vector[0] / current_sw_px
+            flow_norm_dy = flow_vector[1] / current_sw_px
+            flow_norm_speed = math.hypot(flow_norm_dx, flow_norm_dy)
+
+        combined_norm_dx = norm_dx
+        combined_norm_dy = norm_dy
+        if flow_vector is not None:
+            combined_norm_dx = 0.5 * norm_dx + 0.5 * flow_norm_dx
+            combined_norm_dy = 0.5 * norm_dy + 0.5 * flow_norm_dy
+
+        motion_norm_speed = math.hypot(combined_norm_dx, combined_norm_dy)
+        self.smooth_norm_speed = (self.smooth_norm_speed * 0.3) + (motion_norm_speed * 0.7)
+
+        downward_motion   = combined_norm_dy
+        horizontal_motion = abs(combined_norm_dx)
+        upward_motion     = combined_norm_dy
 
         # ── State machine ─────────────────────────────────────────────────────
         hit_detected = None
