@@ -50,9 +50,14 @@ class ARDrumApp:
         self.show_coords       = False
         self.show_occlusion    = False
         self.show_hit_messages = False
+        self.show_flow          = False
         self.show_drum_names   = True
         self.show_left_state   = False
         self.show_pov          = True
+
+        self.optical_flow_enabled = True
+        self.prev_gray           = None
+        self.prev_wrist_px       = {"left": None, "right": None}
 
         self.stick_mode   = False
         self.stick_length = 0
@@ -79,7 +84,8 @@ class ARDrumApp:
             success, image = self.cap.read()
             if not success: continue
             image = cv2.flip(image, 1)
-            
+            filtered_image = cv2.Laplacian(image, cv2.CV_16S, ksize=3)
+            image = cv2.subtract(image,filtered_image)
             if not self.frame_queue.empty():
                 try:
                     self.frame_queue.get_nowait()
@@ -145,18 +151,31 @@ class ARDrumApp:
                         self._stick_ext_l = (0.0, 0.0, 0.0)
                         self._stick_ext_r = (0.0, 0.0, 0.0)
 
+                    left_wrist_px = (s_lm[15].x * self.frame_width, s_lm[15].y * self.frame_height)
+                    right_wrist_px = (s_lm[16].x * self.frame_width, s_lm[16].y * self.frame_height)
+                    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+
+                    if self.optical_flow_enabled:
+                        left_flow, right_flow = self._compute_wrist_optical_flow(gray, left_wrist_px, right_wrist_px)
+                    else:
+                        left_flow, right_flow = None, None
+
                     self.kit.active_stick_ext = self._stick_ext_l
                     hit_l, dbg_l = self.left_arm.process(
                         s_lm[15], w_lm[15], s_lm[11], w_lm[11], s_lm[13],
-                        1.0, self.kit, cur_time_ms, dims, s_lm[12],
+                        1.0, self.kit, cur_time_ms, dims, s_lm[12], left_flow,
                     )
 
                     self.kit.active_stick_ext = self._stick_ext_r
                     hit_r, dbg_r = self.right_arm.process(
                         s_lm[16], w_lm[16], s_lm[12], w_lm[12], s_lm[14],
-                        1.0, self.kit, cur_time_ms, dims, s_lm[11],
+                        1.0, self.kit, cur_time_ms, dims, s_lm[11], right_flow,
                     )
                     self.kit.active_stick_ext = (0.0, 0.0, 0.0)
+
+                    self.prev_gray = gray
+                    self.prev_wrist_px["left"] = left_wrist_px
+                    self.prev_wrist_px["right"] = right_wrist_px
 
                     if hit_l: self.last_l_hit_time = cur_time
                     if hit_r: self.last_r_hit_time = cur_time
@@ -180,6 +199,10 @@ class ARDrumApp:
                     if self.show_drums and self.static_drum_positions:
                         self._draw_drums(image, cur_time)
 
+                    if self.show_flow:
+                        self._draw_optical_flow(image, left_wrist_px, left_flow, (0, 255, 255))
+                        self._draw_optical_flow(image, right_wrist_px, right_flow, (255, 255, 0))
+
                     pov_canvas = self._render_pov_canvas(dbg_l, dbg_r, cur_time, w_lm) if self.show_pov else None
                     self._show_combined(image, pov_canvas, dbg_l, dbg_r, cur_time)
                 else:
@@ -195,6 +218,7 @@ class ARDrumApp:
             elif key == ord("h"): self.show_occlusion    = not self.show_occlusion
             elif key == ord("j"): self.show_hit_messages = not self.show_hit_messages
             elif key == ord("n"): self.show_drum_names   = not self.show_drum_names
+            elif key == ord("o"): self.show_flow        = not self.show_flow
             elif key == ord("y"): self.show_left_state   = not self.show_left_state
             elif key == ord("p"): self.show_pov          = not self.show_pov
             elif key == ord("s"):
@@ -239,6 +263,7 @@ class ARDrumApp:
             ("[C]",   "Coords overlay", self.show_coords),
             ("[H]",   "Occlusion ring", self.show_occlusion),
             ("[J]",   "Hit messages",   self.show_hit_messages),
+            ("[O]",   "Flow debug",     self.show_flow),
             ("[Y]",   "Left-arm state", self.show_left_state),
             ("[ESC]", "Quit",           None),
         ]
@@ -362,6 +387,48 @@ class ARDrumApp:
         tip = (int(wr[0] + (dx / arm_len_px) * hand_px_len), int(wr[1] + (dy / arm_len_px) * hand_px_len))
         cv2.line(image, wr, tip, color, 3)
         cv2.circle(image, tip, 5, color, -1)
+
+    def _draw_optical_flow(self, image, wrist_px, flow, color):
+        if flow is None:
+            return
+        start = (int(wrist_px[0]), int(wrist_px[1]))
+        end = (int(wrist_px[0] + flow[0] * 3), int(wrist_px[1] + flow[1] * 3))
+        cv2.arrowedLine(image, start, end, color, 2, tipLength=0.3)
+
+    def _compute_wrist_optical_flow(self, gray, left_px, right_px):
+        if self.prev_gray is None:
+            return None, None
+
+        prev_left = self.prev_wrist_px.get("left")
+        prev_right = self.prev_wrist_px.get("right")
+        if prev_left is None or prev_right is None:
+            return None, None
+
+        prev_pts = np.array([prev_left, prev_right], dtype=np.float32).reshape(-1, 1, 2)
+        curr_pts, status, err = cv2.calcOpticalFlowPyrLK(
+            self.prev_gray,
+            gray,
+            prev_pts,
+            None,
+            winSize=(31, 31),
+            maxLevel=3,
+            criteria=(cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 20, 0.03),
+        )
+
+        left_flow = None
+        right_flow = None
+        if curr_pts is not None and status is not None:
+            if status.shape[0] > 0 and status[0][0] == 1:
+                left_flow = (float(curr_pts[0, 0, 0] - prev_left[0]), float(curr_pts[0, 0, 1] - prev_left[1]))
+            if status.shape[0] > 1 and status[1][0] == 1:
+                right_flow = (float(curr_pts[1, 0, 0] - prev_right[0]), float(curr_pts[1, 0, 1] - prev_right[1]))
+
+        if left_flow is None and left_px is not None:
+            left_flow = (left_px[0] - prev_left[0], left_px[1] - prev_left[1])
+        if right_flow is None and right_px is not None:
+            right_flow = (right_px[0] - prev_right[0], right_px[1] - prev_right[1])
+
+        return left_flow, right_flow
 
     def _draw_arm_debug(self, image, dbg, color):
         px = dbg["pos_px"]
