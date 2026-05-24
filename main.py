@@ -35,7 +35,7 @@ sys.path.append('./Depth-Anything-V2/metric_depth')
 from depth_anything_v2.dpt import DepthAnythingV2
 
 # ── Master flag ────────────────────────────────────────────────────────────────
-USE_DEPTH_ANYTHING = True   # Set True to load + start depth thread on startup.
+USE_DEPTH_ANYTHING = False   # Set True to load + start depth thread on startup.
                              # Press [Z] to toggle on/off at runtime.
 
 # Depth-Anything V2 outputs disparity-like values: larger = closer to camera.
@@ -76,7 +76,7 @@ class ARDrumApp:
         self.result_queue = queue.Queue(maxsize=2)
         self.running      = True
         self.freeze_drums = True
-        self.cap          = cv2.VideoCapture(0)
+        self.cap          = cv2.VideoCapture(1)
         self.frame_width  = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         self.frame_height = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
         self._clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
@@ -96,6 +96,7 @@ class ARDrumApp:
         self.show_drum_names   = True
         self.show_flow         = False
         self.show_pov          = True
+        self.show_foot_state   = False
 
         self.optical_flow_enabled = True
         self.prev_gray           = None
@@ -386,6 +387,7 @@ class ARDrumApp:
             elif key == ord("n"): self.show_drum_names   = not self.show_drum_names
             elif key == ord("o"): self.show_flow        = not self.show_flow
             elif key == ord("p"): self.show_pov          = not self.show_pov
+            elif key == ord("k"): self.show_foot_state   = not self.show_foot_state
             elif key == ord("s"):
                 self.stick_mode     = not self.stick_mode
                 self.kit.use_sticks = self.stick_mode
@@ -424,6 +426,24 @@ class ARDrumApp:
         combined[:POV_H, cam_w:] = pov_resized
         cv2.line(combined, (cam_w, POV_H), (total_w, POV_H), (40, 40, 40), 2)
 
+        if self.show_foot_state and dbg_foot is not None:
+            tracker_x = 20
+            tracker_y = 20
+            tracker_w = 260
+            tracker_h = 100
+            overlay = combined[tracker_y:tracker_y + tracker_h, tracker_x:tracker_x + tracker_w]
+            cv2.rectangle(combined, (tracker_x, tracker_y), (tracker_x + tracker_w, tracker_y + tracker_h), (18, 24, 36), -1)
+            cv2.rectangle(combined, (tracker_x, tracker_y), (tracker_x + tracker_w, tracker_y + tracker_h), (0, 170, 230), 2)
+            cv2.putText(combined, "BASS DRUM STATE", (tracker_x + 12, tracker_y + 28),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.65, (220, 220, 255), 1, cv2.LINE_AA)
+            state_col = (0, 200, 255) if dbg_foot.get("state") == "DOWN" else (150, 150, 150)
+            cv2.putText(combined, f"State: {dbg_foot.get('state','UP')}",
+                        (tracker_x + 12, tracker_y + 56), cv2.FONT_HERSHEY_SIMPLEX, 0.65, state_col, 1, cv2.LINE_AA)
+            cv2.putText(combined, f"Hit: {'YES' if dbg_foot.get('hit') else 'NO'}",
+                        (tracker_x + 12, tracker_y + 80), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (210, 180, 100), 1, cv2.LINE_AA)
+            cv2.putText(combined, f"Speed: {dbg_foot.get('debug_speed',0.0):.3f}",
+                        (tracker_x + 12, tracker_y + 98), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (180, 180, 180), 1, cv2.LINE_AA)
+
         ctrl_panel = self._build_controls_panel(RIGHT_W, ctrl_h, dbg_l, dbg_r, dbg_foot, cur_time)
         combined[POV_H:, cam_w:] = ctrl_panel
 
@@ -451,6 +471,7 @@ class ARDrumApp:
             ("[D]",   "Toggle drums",   self.show_drums),
             ("[N]",   "Drum names",     self.show_drum_names),
             ("[P]",   "POV window",     self.show_pov),
+            ("[K]",   "Bass state",     self.show_foot_state),
             ("[S]",   "Stick mode",     self.stick_mode),
             ("[C]",   "Coords overlay", self.show_coords),
             ("[F]",   "Freeze drums",   self.freeze_drums),

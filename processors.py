@@ -108,7 +108,7 @@ class GestureWristProcessor:
             if (self.smooth_norm_speed > SPEED_THRESHOLD and
                     self.prev_3d_coords is not None and
                     downward_motion > 0 and
-                    world_y_delta > self.WORLD_Y_STRIKE_THRESHOLD and   # <-- new gate
+                    world_y_delta < -self.WORLD_Y_STRIKE_THRESHOLD and   # <-- downward = negative Y delta in world coords
                     sw_dist > self.MIN_ARM_EXTENSION_M and    
                     (cur_time_ms - self.last_hit_time) > COOLDOWN_MS):
                 hit_detected = kit.check_line_intersection(
