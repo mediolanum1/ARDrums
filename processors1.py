@@ -1,7 +1,7 @@
 import math
 
 from kalman_wrist import WristKalman
-
+from typing import Optional
 UP = 0
 DOWN = 1
 
@@ -22,7 +22,7 @@ class GestureWristProcessor:
         self.state_change_frame = 0
         self.last_hit_time = 0
         # In processors.py __init__ — one new threshold
-        self.MIN_ARM_EXTENSION_M = 0.38   # tweak: ~28 cm shoulder-to-wrist minimum
+        self.MIN_ARM_EXTENSION_M = 0.32   # tweak: ~28 cm shoulder-to-wrist minimum
         self.prev_wrist_px   = None
         self.prev_3d_coords  = None
         self.smooth_norm_speed = 0.0
@@ -46,7 +46,8 @@ class GestureWristProcessor:
 
     def process(self, w_scr, w_wrl, sh_scr, sh_wrl, el_scr,
                 sw_m, kit, cur_time_ms, frame_dims, other_sh_scr,
-                mediapipe_present: bool = True):
+                mediapipe_present: bool = True,
+                rhythm_session=None):
         """
         mediapipe_present — pass False when MediaPipe returned no landmarks
         for this side so the filter can extrapolate instead of freezing.
@@ -125,9 +126,18 @@ class GestureWristProcessor:
                     self.prev_3d_coords is not None and
                     downward_motion > 0 and
                     world_y_delta > self.WORLD_Y_STRIKE_THRESHOLD and
-                    sw_dist > self.MIN_ARM_EXTENSION_M and    
+                    sw_dist > self.MIN_ARM_EXTENSION_M and
                     (cur_time_ms - self.last_hit_time) > COOLDOWN_MS):
-
+        
+                # ── Rhythm-stats hook: 2D trigger ──────────────────────────────
+                if rhythm_session is not None:
+                    rhythm_session.on_2d_trigger(
+                        wrist_px    = wrist_px,
+                        wrist_3d    = curr_3d_coords,
+                        time_ms     = cur_time_ms,
+                    )
+                # ──────────────────────────────────────────────────────────────
+        
                 hit_detected = kit.check_line_intersection(
                     self.prev_3d_coords,
                     curr_3d_coords,
@@ -137,10 +147,21 @@ class GestureWristProcessor:
                     wrist_px,
                     self.label,
                 )
+        
+                # ── Rhythm-stats hook: 3D result ───────────────────────────────
+                if rhythm_session is not None:
+                    rhythm_session.on_3d_result(
+                        drum_name   = hit_detected,
+                        wrist_px    = wrist_px,
+                        wrist_3d    = curr_3d_coords,
+                        time_ms     = cur_time_ms,
+                    )
+                # ──────────────────────────────────────────────────────────────
+        
+                #if hit_detected:  # [ DEBUG ]
+                self.last_hit_time = cur_time_ms
+                self.state = UP
 
-                if hit_detected:
-                    self.last_hit_time = cur_time_ms
-                    self.state = UP
 
             if upward_motion < MIN_UPWARD_MOTION:
                 self.state_change_frame += 1
