@@ -26,7 +26,7 @@ class GestureWristProcessor:
         self.prev_wrist_px   = None
         self.prev_3d_coords  = None
         self.smooth_norm_speed = 0.0
-        self.WORLD_Y_STRIKE_THRESHOLD = 0.008   # ~8 mm downward in world metres
+        self.WORLD_Y_STRIKE_THRESHOLD = 0.003   # ~8 mm downward in world metres
 
         # ── Kalman filter for 3-D wrist position ─────────────────────────
         # process_noise   : raise if you swing fast and the filter lags behind

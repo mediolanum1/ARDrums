@@ -69,8 +69,7 @@ class ARDrumApp:
         self.metric_to_px_scale = 1.0
         self._current_sw_px     = 120.0
 
-        # ── Distance to user (estimated from calibration + current shoulder px) ──
-        self._calibrated_distance_m = None   # set once calibration completes
+        self._calibrated_distance_m = None 
 
         self.show_drums        = True
         self.show_coords       = False
@@ -81,12 +80,14 @@ class ARDrumApp:
         self.optical_flow_enabled = True
         self.prev_gray           = None
         self.prev_wrist_px       = {"left": None, "right": None}
-
+        self.TARGET_CALIB_FRAMES   = 5
+        self._calib_sw_m_list      = []
+        self._calib_sw_px_list     = []
         self.stick_mode   = False
         self.stick_length = 0.1
         self._stick_ext_l = (0.0, 0.0, 0.0)
         self._stick_ext_r = (0.0, 0.0, 0.0)
-
+        self.calibration_error_msg  = ""
         self._last_stick_dir_l = (0.0, 1.0)
         self._last_stick_dir_r = (0.0, 1.0)
         self._STICK_MIN_ARM_PX = 22
@@ -115,21 +116,15 @@ class ARDrumApp:
             frame_w=self.frame_width,
             frame_h=self.frame_height,
         )
-        # ── Bass-drum foot processor (LEFT foot) ──────────────────────────────
+  
         self.right_foot = GestureFootProcessor("RF")
-        # ─────────────────────────────────────────────────────────────────────
-
-        # ── Depth Anything V2 state ───────────────────────────────────────────
         self.depth_anything_loaded = False
         self.depth_active          = False
         self._depth_frame_queue    = queue.Queue(maxsize=2)
         self._latest_depth_map     = None
         self._depth_lock           = threading.Lock()
         self._depth_status_msg     = ""
-        # ─────────────────────────────────────────────────────────────────────
-
-    # ── Camera thread ─────────────────────────────────────────────────────────
-
+    
     def camera_thread(self):
         while self.running:
             success, image = self.cap.read()
@@ -152,8 +147,6 @@ class ARDrumApp:
                     pass
                 self._depth_frame_queue.put(image)
 
-    # ── Pre-processing ────────────────────────────────────────────────────────
-
     def _preprocess(self, frame):
         lab = cv2.cvtColor(frame, cv2.COLOR_BGR2LAB)
         l, a, b = cv2.split(lab)
@@ -164,7 +157,6 @@ class ARDrumApp:
         l_final = np.clip(sharpened_l, 0, 255).astype(np.uint8)
         return cv2.cvtColor(cv2.merge([l_final, a, b]), cv2.COLOR_LAB2BGR)
 
-    # ── MediaPipe AI thread ───────────────────────────────────────────────────
 
     def ai_thread(self):
         options = PoseLandmarkerOptions(
@@ -189,7 +181,6 @@ class ARDrumApp:
                         pass
                 self.result_queue.put((raw_image, result, time.time()))
 
-    # ── Depth Anything V2 thread ──────────────────────────────────────────────
 
     def _load_depth_model(self):
         self._depth_status_msg = "Loading Depth Anything V2 Metric…"
@@ -232,7 +223,6 @@ class ARDrumApp:
             except Exception as exc:
                 print(f"[DEPTH] Inference error: {exc}")
 
-    # ── Depth fusion helpers ──────────────────────────────────────────────────
 
     def _depth_at_screen_lm(self, lm, dm):
         px = int(np.clip(lm.x * self.frame_width,  0, self.frame_width  - 1))
@@ -254,10 +244,8 @@ class ARDrumApp:
 
         d_hip = (self._depth_at_screen_lm(l_hip, dm) +
                  self._depth_at_screen_lm(r_hip, dm)) / 2.0
-
-        # Patch arms AND legs so the foot processor gets depth-fused Z too
         fused_indices = (11, 12, 13, 14, 15, 16,   # arms / wrists
-                         25, 26, 27, 28)             # knees / ankles
+                         25, 26, 27, 28)             # legs / ankles
         for idx in fused_indices:
             if s_lm[idx].visibility < 0.4:
                 continue
@@ -266,8 +254,6 @@ class ARDrumApp:
             patched[idx] = _LM(w_lm[idx], z=z_new)
 
         return patched
-
-    # ── Main render loop ──────────────────────────────────────────────────────
 
     def main_render_loop(self):
         while self.running:
@@ -290,6 +276,12 @@ class ARDrumApp:
                             f"READY IN: {int(self.COUNTDOWN_SECONDS - elapsed)}",
                             (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2,
                         )
+                        if hasattr(self, 'calibration_error_msg') and self.calibration_error_msg:
+                            cv2.putText(
+                                image,
+                                self.calibration_error_msg,
+                                (50, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2,
+                            )
                     else:
                         self._calibrate(s_lm, w_lm)
 
@@ -323,13 +315,11 @@ class ARDrumApp:
                     else:
                         left_flow, right_flow = None, None
 
-                    # ── Wrist processors ──────────────────────────────────
+                 
                     self.kit.active_stick_ext = self._stick_ext_l
                     hit_l, dbg_l = self.left_arm.process(
                         s_lm[15], w_lm_eff[15], s_lm[11], w_lm_eff[11], s_lm[13],
                         1.0, self.kit, cur_time_ms, dims, s_lm[12], left_flow
-
-                                   # ← NEW
                     )
 
 
@@ -343,19 +333,19 @@ class ARDrumApp:
                     if (self.rhythm_session is not None and
                             not self.rhythm_session.is_active):
                         self.rhythm_session.print_summary()
-                        self.rhythm_session.save("results/rhythm_session_2_gunak.json")
+                        self.rhythm_session.save("results/rhythm_session_with_feet_5.json")
                         self.rhythm_session = None 
                     self.kit.active_stick_ext = (0.0, 0.0, 0.0)
                     self.prev_gray = gray
                     self.prev_wrist_px["left"]  = left_wrist_px
                     self.prev_wrist_px["right"] = right_wrist_px
 
-                    # ── Foot / bass-drum processor — LEFT foot (ankle 27) ─────
+                   
                     hit_foot, dbg_foot = self.right_foot.process(
-                        ankle_scr     = s_lm[27],          # left ankle
+                        ankle_scr     = s_lm[27],         
                         ankle_wrl     = w_lm_eff[27],
-                        hip_scr       = s_lm[23],          # left hip
-                        other_hip_scr = s_lm[24],          # right hip
+                        hip_scr       = s_lm[23],          
+                        other_hip_scr = s_lm[24],          
                         kit           = self.kit,
                         cur_time_ms   = cur_time_ms,
                         frame_dims    = dims,
@@ -420,8 +410,6 @@ class ARDrumApp:
                 else:
                     print("[RHYTHM] Session already running.")
 
-    # ── UI helpers ────────────────────────────────────────────────────────────
-
     def _estimate_distance_m(self):
         """Estimate distance to user (metres) from calibrated shoulder width
         and the current pixel shoulder width using the pinhole camera model:
@@ -462,6 +450,7 @@ class ARDrumApp:
         ctrl_panel = self._build_controls_panel(RIGHT_W, ctrl_h, dbg_l, dbg_r, dbg_foot, cur_time)
         combined[POV_H:, cam_w:] = ctrl_panel
 
+        
         cv2.imshow(WIN_NAME, combined)
 
     def _build_controls_panel(self, w, h, dbg_l, dbg_r, dbg_foot, cur_time):
@@ -469,7 +458,7 @@ class ARDrumApp:
         cv2.rectangle(panel, (0, 0), (w, 32), (24, 28, 42), -1)
         cv2.putText(panel, "CONTROLS", (14, 22), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 210, 210), 1)
 
-        # ── Distance readout (pinhole estimate, updated every frame) ─────────
+    
         dist_m = self._estimate_distance_m()
         if dist_m is not None:
             dist_txt = f"Distance: {dist_m:.2f} m"
@@ -483,8 +472,7 @@ class ARDrumApp:
         ts = cv2.getTextSize(dist_txt, cv2.FONT_HERSHEY_SIMPLEX, 0.55, 1)[0]
         cv2.putText(panel, dist_txt, ((w - ts[0]) // 2, 54),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.55, dist_col, 1)
-        # ─────────────────────────────────────────────────────────────────────
-
+       
         if not USE_DEPTH_ANYTHING and not self.depth_anything_loaded:
             depth_state = None
             depth_label = "DepthAnyV2 (disabled)"
@@ -511,7 +499,7 @@ class ARDrumApp:
             ("[ESC]", "Quit",           None),
         ]
 
-        # Buttons start below the distance box (offset by 30px extra)
+
         DIST_BOX_BOTTOM = 68
         row_h = max(26, (h - DIST_BOX_BOTTOM - 40) // len(keys))
         for i, (key, label, state) in enumerate(keys):
@@ -529,7 +517,7 @@ class ARDrumApp:
                 lbl = "ON" if state else "off"
                 cv2.putText(panel, lbl, (dot_x - 26, y), cv2.FONT_HERSHEY_SIMPLEX, 0.38, dot_col, 1)
 
-        # ── Hit flashes ───────────────────────────────────────────────────
+      
         base_y = h - 18
         col_hit = (0, 255, 120)
         if dbg_l and (cur_time - self.last_l_hit_time) < 0.4:
@@ -549,31 +537,51 @@ class ARDrumApp:
 
         return panel
 
-    # ── Calibration & drum positioning ────────────────────────────────────────
 
     def _calibrate(self, s_lm, w_lm):
-        l_sh_w, r_sh_w = w_lm[11], w_lm[12]
-        l_sh_s, r_sh_s = s_lm[11], s_lm[12]
-        if l_sh_s.visibility <= 0.5 or r_sh_s.visibility <= 0.5:
-            return
+            l_sh_w, r_sh_w = w_lm[11], w_lm[12]
+            l_sh_s, r_sh_s = s_lm[11], s_lm[12]
+            
+            # If shoulders aren't clearly visible, skip this frame
+            if l_sh_s.visibility <= 0.5 or r_sh_s.visibility <= 0.5:
+                return
 
-        self.fixed_sw_m = math.sqrt(
-            (l_sh_w.x - r_sh_w.x) ** 2 +
-            (l_sh_w.y - r_sh_w.y) ** 2 +
-            (l_sh_w.z - r_sh_w.z) ** 2
-        )
-        fixed_sw_px = math.hypot(
-            (l_sh_s.x - r_sh_s.x) * self.frame_width,
-            (l_sh_s.y - r_sh_s.y) * self.frame_height,
-        )
-        self.metric_to_px_scale = fixed_sw_px / self.fixed_sw_m if self.fixed_sw_m > 0 else 1.0
+            # 1. Calculate current frame measurements
+            cur_sw_m = math.sqrt(
+                (l_sh_w.x - r_sh_w.x) ** 2 +
+                (l_sh_w.y - r_sh_w.y) ** 2 +
+                (l_sh_w.z - r_sh_w.z) ** 2
+            )
+            cur_sw_px = math.hypot(
+                (l_sh_s.x - r_sh_s.x) * self.frame_width,
+                (l_sh_s.y - r_sh_s.y) * self.frame_height,
+            )
 
-        # Snapshot the distance at the moment of calibration
-        if fixed_sw_px > 0 and self.fixed_sw_m > 0:
-            self._calibrated_distance_m = (self.focal_length * self.fixed_sw_m) / fixed_sw_px
+            # 2. Store them
+            self._calib_sw_m_list.append(cur_sw_m)
+            self._calib_sw_px_list.append(cur_sw_px)
+            print(f"[CAL] Frame {len(self._calib_sw_m_list)}/{self.TARGET_CALIB_FRAMES} captured.")
 
-        print(f"[CAL] sw={self.fixed_sw_m:.3f} m  dist≈{self._calibrated_distance_m:.2f} m")
-        self.is_calibrated = True
+            # 3. Check if we have enough frames to finalize
+            if len(self._calib_sw_m_list) >= self.TARGET_CALIB_FRAMES:
+                # Average the collected data
+                self.fixed_sw_m = sum(self._calib_sw_m_list) / self.TARGET_CALIB_FRAMES
+                avg_sw_px       = sum(self._calib_sw_px_list) / self.TARGET_CALIB_FRAMES
+
+                # Establish the baseline scale and distance
+                self.metric_to_px_scale = avg_sw_px / self.fixed_sw_m if self.fixed_sw_m > 0 else 1.0
+
+                if avg_sw_px > 0 and self.fixed_sw_m > 0:
+                    self._calibrated_distance_m = (self.focal_length * self.fixed_sw_m) / avg_sw_px
+                    if self._calibrated_distance_m < 1.0:
+                        print(f"[CAL] FAILED: Distance {self._calibrated_distance_m:.2f}m is less than 1.0m. Restarting...")
+                        self.calibration_error_msg = "please stand at least 1 meter away from camera"
+                        self._calib_sw_m_list.clear()
+                        self._calib_sw_px_list.clear()
+                        self.program_start_time = time.time() # Reset the countdown timer
+                        return
+                print(f"[CAL] DONE. Avg sw={self.fixed_sw_m:.3f} m  dist≈{self._calibrated_distance_m:.2f} m")
+                self.is_calibrated = True
 
     def _update_drum_positions(self, s_lm):
         l_sh_s, r_sh_s = s_lm[11], s_lm[12]
