@@ -1,3 +1,4 @@
+from email.mime import image
 import threading
 import queue
 import cv2
@@ -289,12 +290,13 @@ class ARDrumApp:
                     self._update_drum_positions(s_lm)
                     cur_time_ms = int(time.time() * 1000)
                     dims        = (self.frame_width, self.frame_height)
-
                     if self.depth_active and self.depth_anything_loaded:
                         w_lm_eff = self._patch_wlm_with_depth(w_lm, s_lm)
                     else:
-                        w_lm_eff = w_lm
+                        # Convert to list so we can mutate the wrists
+                        w_lm_eff = list(w_lm)
 
+                    # Proceed as normal with the (potentially modified) landmarks
                     wrist_l_world = (w_lm_eff[15].x, w_lm_eff[15].y, w_lm_eff[15].z)
                     wrist_r_world = (w_lm_eff[16].x, w_lm_eff[16].y, w_lm_eff[16].z)
 
