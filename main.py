@@ -100,7 +100,7 @@ class ARDrumApp:
 
         self.program_start_time = time.time()
         self.COUNTDOWN_SECONDS  = 5
-        
+        self._depth_boost_weight = 0.0
         self.left_arm  = GestureWristProcessor("L")
         self.right_arm = GestureWristProcessor("R")
         self._tip_tracker_l = ColorTipTracker(
@@ -295,8 +295,48 @@ class ARDrumApp:
                     else:
                         # Convert to list so we can mutate the wrists
                         w_lm_eff = list(w_lm)
+                        
+                    wl, wr = w_lm_eff[15], w_lm_eff[16]
 
-                    # Proceed as normal with the (potentially modified) landmarks
+                    y_shoulder_avg   = (w_lm_eff[11].y + w_lm_eff[12].y) / 2.0
+                    y_hip_avg        = (w_lm_eff[23].y + w_lm_eff[24].y) / 2.0
+                    torso_height     = y_hip_avg - y_shoulder_avg
+
+                    y_stomach_top    = y_shoulder_avg + (torso_height * 0.4)
+                    y_stomach_bottom = y_hip_avg
+
+                    # Screen-space horizontal check: wrists must be within the shoulder column,
+                    # not off to either side. Uses s_lm (normalised 0-1 image coords).
+                    torso_x_min  = min(s_lm[11].x, s_lm[12].x)
+                    torso_x_max  = max(s_lm[11].x, s_lm[12].x)
+                    shoulder_w   = torso_x_max - torso_x_min
+                    h_padding    = shoulder_w * 0.10          # 10% slack on each edge
+
+                    l_in_torso_x = torso_x_min - h_padding < s_lm[15].x < torso_x_max + h_padding
+                    r_in_torso_x = torso_x_min - h_padding < s_lm[16].x < torso_x_max + h_padding
+
+                    condition_met = (
+                        y_stomach_top < wl.y < y_stomach_bottom and   # world Y: stomach height
+                        y_stomach_top < wr.y < y_stomach_bottom and
+                        wl.z < -0.2 and                                # world Z: arms extended forward
+                        wr.z < -0.2 and
+                        l_in_torso_x and                               # screen X: not off to the side
+                        r_in_torso_x
+                    )
+
+                    _BOOST_RISE = 0.25   # ~4 frames to fully activate
+                    _BOOST_FALL = 0.05   # ~20 frames to fully decay
+
+                    if condition_met:
+                        self._depth_boost_weight = min(1.0, self._depth_boost_weight + _BOOST_RISE)
+                    else:
+                        self._depth_boost_weight = max(0.0, self._depth_boost_weight - _BOOST_FALL)
+
+                    if self._depth_boost_weight > 1e-3:
+                        effective_boost = -0.08 * self._depth_boost_weight
+                        w_lm_eff[15] = _LM(wl, z=wl.z + effective_boost)
+                        w_lm_eff[16] = _LM(wr, z=wr.z + effective_boost)
+
                     wrist_l_world = (w_lm_eff[15].x, w_lm_eff[15].y, w_lm_eff[15].z)
                     wrist_r_world = (w_lm_eff[16].x, w_lm_eff[16].y, w_lm_eff[16].z)
 
