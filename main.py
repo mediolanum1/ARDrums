@@ -19,7 +19,7 @@ from kalman_wrist import WristKalman
 from rhythm_stats import RhythmSession
 from typing import Optional
 sys.path.append('./Depth-Anything-V2/metric_depth')
-
+from depth_estimator import KinematicDepthEstimator
 # 2. Import dpt THROUGH the depth_anything_v2 package
 from depth_anything_v2.dpt import DepthAnythingV2
 
@@ -53,6 +53,8 @@ class _LM:
 
 class ARDrumApp:
     def __init__(self):
+        self.depth_comparison_stats = []
+        self.anatomical_depth = KinematicDepthEstimator()
         self.frame_queue  = queue.Queue(maxsize=2)
         self.result_queue = queue.Queue(maxsize=2)
         self.running      = True
@@ -84,6 +86,8 @@ class ARDrumApp:
         self.TARGET_CALIB_FRAMES   = 5
         self._calib_sw_m_list      = []
         self._calib_sw_px_list     = []
+        self._calib_p_forearm_px_list = []
+        self._calib_p_upper_px_list   = []
         self.stick_mode   = False
         self.stick_length = 0.1
         self._stick_ext_l = (0.0, 0.0, 0.0)
@@ -295,7 +299,72 @@ class ARDrumApp:
                     else:
                         # Convert to list so we can mutate the wrists
                         w_lm_eff = list(w_lm)
+                            # ---> NEW: Apply Anatomical Depth Override <---
+                    if not self.depth_active: # Only use if Depth Anything isn't overriding
+                        # Helper to convert normalized landmark to pixel coordinates
+                        def to_px(lm):
+                            return (lm.x * self.frame_width, lm.y * self.frame_height)
+
+                        # --- LEFT ARM ---
+                        l_shoulder_px = to_px(s_lm[11])
+                        l_elbow_px    = to_px(s_lm[13])
+                        l_wrist_px    = to_px(s_lm[15])
                         
+                        # Store raw MediaPipe Z values before mutation
+                        mp_l_elbow_z = w_lm_eff[13].z
+                        mp_l_wrist_z = w_lm_eff[15].z
+                        
+                        # Calculate geometric Z
+                        l_elbow_geom_z, l_wrist_geom_z = self.anatomical_depth.estimate_chain_z(
+                            l_shoulder_px, l_elbow_px, l_wrist_px, 
+                            self.metric_to_px_scale, 
+                            shoulder_z=w_lm_eff[11].z # Anchor to MediaPipe's shoulder Z
+                        )
+                        # Override the world landmarks
+                        w_lm_eff[13] = _LM(w_lm_eff[13], z=l_elbow_geom_z)
+                        w_lm_eff[15] = _LM(w_lm_eff[15], z=l_wrist_geom_z)
+
+                        # --- RIGHT ARM ---
+                        r_shoulder_px = to_px(s_lm[12])
+                        r_elbow_px    = to_px(s_lm[14])
+                        r_wrist_px    = to_px(s_lm[16])
+                        
+                        # Store raw MediaPipe Z values before mutation
+                        mp_r_elbow_z = w_lm_eff[14].z
+                        mp_r_wrist_z = w_lm_eff[16].z
+                        
+                        r_elbow_geom_z, r_wrist_geom_z = self.anatomical_depth.estimate_chain_z(
+                            r_shoulder_px, r_elbow_px, r_wrist_px, 
+                            self.metric_to_px_scale, 
+                            shoulder_z=w_lm_eff[12].z
+                        )
+                        w_lm_eff[14] = _LM(w_lm_eff[14], z=r_elbow_geom_z)
+                        w_lm_eff[16] = _LM(w_lm_eff[16], z=r_wrist_geom_z)
+
+                        # ─── NEW: Collect Comparison Statistics ───
+                        self.depth_comparison_stats.append({
+                            "timestamp_ms": int(time.time() * 1000),
+                            "left_elbow": {
+                                "mediapipe_z": float(mp_l_elbow_z),
+                                "anatomical_z": float(l_elbow_geom_z),
+                                "delta": float(l_elbow_geom_z - mp_l_elbow_z)
+                            },
+                            "left_wrist": {
+                                "mediapipe_z": float(mp_l_wrist_z),
+                                "anatomical_z": float(l_wrist_geom_z),
+                                "delta": float(l_wrist_geom_z - mp_l_wrist_z)
+                            },
+                            "right_elbow": {
+                                "mediapipe_z": float(mp_r_elbow_z),
+                                "anatomical_z": float(r_elbow_geom_z),
+                                "delta": float(r_elbow_geom_z - mp_r_elbow_z)
+                            },
+                            "right_wrist": {
+                                "mediapipe_z": float(mp_r_wrist_z),
+                                "anatomical_z": float(r_wrist_geom_z),
+                                "delta": float(r_wrist_geom_z - mp_r_wrist_z)
+                            }
+                        })
                     wl, wr = w_lm_eff[15], w_lm_eff[16]
 
                     y_shoulder_avg   = (w_lm_eff[11].y + w_lm_eff[12].y) / 2.0
@@ -420,6 +489,7 @@ class ARDrumApp:
             key = cv2.waitKey(1) & 0xFF
             if key == 27:
                 self.running = False
+                self._save_depth_comparison_json()
             elif key == ord("f"): self.freeze_drums      = not self.freeze_drums
             elif key == ord("d"): self.show_drums        = not self.show_drums
             elif key == ord("c"): self.show_coords       = not self.show_coords
@@ -595,11 +665,34 @@ class ARDrumApp:
                 (l_sh_w.z - r_sh_w.z) ** 2
             )
             cur_sw_px = math.hypot(
-                (l_sh_s.x - r_sh_s.x) * self.frame_width,
-                (l_sh_s.y - r_sh_s.y) * self.frame_height,
-            )
+            (l_sh_s.x - r_sh_s.x) * self.frame_width,
+            (l_sh_s.y - r_sh_s.y) * self.frame_height,
+        )
+            # Inside your _calibrate loop where you average frames:
+            # Left Arm px measurements
+            l_shoulder_px = (s_lm[11].x * self.frame_width, s_lm[11].y * self.frame_height)
+            l_elbow_px    = (s_lm[13].x * self.frame_width, s_lm[13].y * self.frame_height)
+            l_wrist_px    = (s_lm[15].x * self.frame_width, s_lm[15].y * self.frame_height)
 
+            # Right Arm px measurements
+            r_shoulder_px = (s_lm[12].x * self.frame_width, s_lm[12].y * self.frame_height)
+            r_elbow_px    = (s_lm[14].x * self.frame_width, s_lm[14].y * self.frame_height)
+            r_wrist_px    = (s_lm[16].x * self.frame_width, s_lm[16].y * self.frame_height)
+
+            # Calculate lengths for left
+            l_upper_px   = math.hypot(l_elbow_px[0] - l_shoulder_px[0], l_elbow_px[1] - l_shoulder_px[1])
+            l_forearm_px = math.hypot(l_wrist_px[0] - l_elbow_px[0], l_wrist_px[1] - l_elbow_px[1])
+
+            # Calculate lengths for right
+            r_upper_px   = math.hypot(r_elbow_px[0] - r_shoulder_px[0], r_elbow_px[1] - r_shoulder_px[1])
+            r_forearm_px = math.hypot(r_wrist_px[0] - r_elbow_px[0], r_wrist_px[1] - r_elbow_px[1])
+
+            # Average them to remove asymmetric bias
+            p_upper_px   = (l_upper_px + r_upper_px) / 2.0
+            p_forearm_px = (l_forearm_px + r_forearm_px) / 2.0
             # 2. Store them
+            self._calib_p_upper_px_list.append(p_upper_px)
+            self._calib_p_forearm_px_list.append(p_forearm_px)
             self._calib_sw_m_list.append(cur_sw_m)
             self._calib_sw_px_list.append(cur_sw_px)
             print(f"[CAL] Frame {len(self._calib_sw_m_list)}/{self.TARGET_CALIB_FRAMES} captured.")
@@ -609,9 +702,17 @@ class ARDrumApp:
                 # Average the collected data
                 self.fixed_sw_m = sum(self._calib_sw_m_list) / self.TARGET_CALIB_FRAMES
                 avg_sw_px       = sum(self._calib_sw_px_list) / self.TARGET_CALIB_FRAMES
-
+                avg_upper_px    = sum(self._calib_p_upper_px_list) / self.TARGET_CALIB_FRAMES
+                avg_forearm_px  = sum(self._calib_p_forearm_px_list) / self.TARGET_CALIB_FRAMES
                 # Establish the baseline scale and distance
                 self.metric_to_px_scale = avg_sw_px / self.fixed_sw_m if self.fixed_sw_m > 0 else 1.0
+
+                # Convert to meters using your established metric_to_px_scale
+                avg_upper_arm_m = avg_upper_px / self.metric_to_px_scale
+                avg_forearm_m = avg_forearm_px / self.metric_to_px_scale
+
+                # Store these in lists, average them over the calibration frames, and pass to the estimator:
+                self.anatomical_depth.calibrate_exact_lengths(avg_upper_arm_m, avg_forearm_m)
 
                 if avg_sw_px > 0 and self.fixed_sw_m > 0:
                     self._calibrated_distance_m = (self.focal_length * self.fixed_sw_m) / avg_sw_px
@@ -620,6 +721,9 @@ class ARDrumApp:
                         self.calibration_error_msg = "please stand at least 1 meter away from camera"
                         self._calib_sw_m_list.clear()
                         self._calib_sw_px_list.clear()
+                        # NEW: Clear the kinematic lists too!
+                        self._calib_p_upper_px_list.clear()
+                        self._calib_p_forearm_px_list.clear()
                         self.program_start_time = time.time() # Reset the countdown timer
                         return
                 print(f"[CAL] DONE. Avg sw={self.fixed_sw_m:.3f} m  dist≈{self._calibrated_distance_m:.2f} m")
@@ -672,6 +776,45 @@ class ARDrumApp:
         self.kit.pixel_positions = self.cached_drum_positions
 
     # ── Stick / hand drawing ──────────────────────────────────────────────────
+    def _save_depth_comparison_json(self, filename="results/depth_comparison_analysis.json"):
+            """Compiles overall run metrics and dumps tracking history to JSON."""
+            import os
+            import json
+            
+            if not self.depth_comparison_stats:
+                print("[STATS] No comparison data gathered during this session.")
+                return
+
+            # Ensure directory structure exists
+            os.makedirs(os.path.dirname(filename), exist_ok=True)
+
+            # Compute helpful statistical summaries over the session
+            l_wrist_deltas = [entry["left_wrist"]["delta"] for entry in self.depth_comparison_stats]
+            r_wrist_deltas = [entry["right_wrist"]["delta"] for entry in self.depth_comparison_stats]
+            
+            summary = {
+                "total_frames_recorded": len(self.depth_comparison_stats),
+                "session_duration_seconds": (self.depth_comparison_stats[-1]["timestamp_ms"] - self.depth_comparison_stats[0]["timestamp_ms"]) / 1000.0,
+                "metrics": {
+                    "left_wrist_mean_delta": sum(l_wrist_deltas) / len(l_wrist_deltas),
+                    "left_wrist_max_delta": max(l_wrist_deltas, key=abs),
+                    "right_wrist_mean_delta": sum(r_wrist_deltas) / len(r_wrist_deltas),
+                    "right_wrist_max_delta": max(r_wrist_deltas, key=abs)
+                }
+            }
+
+            output_payload = {
+                "summary": summary,
+                "timeseries_data": self.depth_comparison_stats
+            }
+
+            try:
+                with open(filename, "w") as f:
+                    json.dump(output_payload, f, indent=4)
+                print(f"[STATS] Depth performance comparison successfully exported to: {filename}")
+            except Exception as e:
+                print(f"[STATS] Error writing comparison file: {e}")
+
 
     def _compute_stick_ext(self, finger_w, wrist_w):
         dx = finger_w.x - wrist_w.x
