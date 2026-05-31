@@ -1,10 +1,14 @@
 import math
-
-from kalman_wrist import WristKalman
 from typing import Optional
+
+# Ensure this imports correctly based on your new folder structure
+from ARDrum_kit.processing.kalman_wrist import WristKalman
+
+# ─── Gesture State Constants ───
 UP = 0
 DOWN = 1
 
+# ─── Tuning Thresholds ───
 SPEED_THRESHOLD              = 0.015
 COOLDOWN_MS                  = 100
 STATE_CHANGE_FRAME_THRESHOLD = 1
@@ -17,19 +21,27 @@ STALL_SPEED_THRESHOLD        = 0.008
 
 class GestureWristProcessor:
     def __init__(self, label):
+        """
+        Processes raw wrist landmarks, applies Kalman filtering, and manages 
+        the UP/DOWN striking state machine to detect drum hits.
+        
+        :param label: "L" for Left Arm, "R" for Right Arm.
+        """
         self.label = label
         self.state = UP
         self.state_change_frame = 0
         self.last_hit_time = 0
-        # In processors.py __init__ — one new threshold
-        self.MIN_ARM_EXTENSION_M = 0.32   # tweak: ~28 cm shoulder-to-wrist minimum
+        
+        # Minimum physical distance from shoulder to wrist to register a hit (~28 cm)
+        self.MIN_ARM_EXTENSION_M = 0.32   
+        self.WORLD_Y_STRIKE_THRESHOLD = 0.003  # ~8 mm downward in world metres
+        
         self.prev_wrist_px   = None
         self.prev_3d_coords  = None
         self.smooth_norm_speed = 0.0
-        self.WORLD_Y_STRIKE_THRESHOLD = 0.003   # ~8 mm downward in world metres
 
         # ── Kalman filter for 3-D wrist position ─────────────────────────
-        # process_noise   : raise if you swing fast and the filter lags behind
+        # process_noise: raise if you swing fast and the filter lags behind
         # measurement_noise: raise if MediaPipe is noisy on your camera
         self._kf = WristKalman(
             dt=1 / 30,
@@ -37,24 +49,26 @@ class GestureWristProcessor:
             measurement_noise=1e-1,
         )
         self._mediapipe_missing_frames = 0
+        
         # How many consecutive missing frames before we reset the filter.
         # 6 frames (~0.2 s at 30 fps) is generous enough to survive fast
         # swings while not letting a drifted prediction run forever.
         self._MAX_MISSING_FRAMES = 6
-
-    # ─────────────────────────────────────────────────────────────────────
 
     def process(self, w_scr, w_wrl, sh_scr, sh_wrl, el_scr,
                 sw_m, kit, cur_time_ms, frame_dims, other_sh_scr,
                 mediapipe_present: bool = True,
                 rhythm_session=None):
         """
-        mediapipe_present — pass False when MediaPipe returned no landmarks
-        for this side so the filter can extrapolate instead of freezing.
+        Evaluates the current frame's kinematics and triggers hits on the kit.
+        
+        :param mediapipe_present: Pass False when MediaPipe returned no landmarks
+                                  for this side so the filter can extrapolate.
         """
         w, h = frame_dims
         wrist_px = (w_scr.x * w, w_scr.y * h)
 
+        # Normalize speed against shoulder width to keep math consistent regardless of user distance
         current_sw_px = math.hypot(
             sh_scr.x - other_sh_scr.x,
             sh_scr.y - other_sh_scr.y,
@@ -72,8 +86,8 @@ class GestureWristProcessor:
                 # Signal has been gone too long — reset so we don't drift.
                 self._kf.reset()
                 self._mediapipe_missing_frames = 0
-                # Nothing useful to do this frame.
                 return None, self._empty_debug(wrist_px)
+            
             # Extrapolate: keep the filter running without a measurement.
             kx, ky, kz = self._kf.predict_only()
 
@@ -83,6 +97,7 @@ class GestureWristProcessor:
         norm_dx = 0.0
         norm_dy = 0.0
         raw_norm_speed = 0.0
+        
         if self.prev_wrist_px is not None:
             dx = wrist_px[0] - self.prev_wrist_px[0]
             dy = wrist_px[1] - self.prev_wrist_px[1]
@@ -99,6 +114,7 @@ class GestureWristProcessor:
         hit_detected = None
 
         if self.state == UP:
+            # Transition to DOWN state if moving fast enough downwards or sideways
             if raw_norm_speed > SPEED_THRESHOLD and (
                 downward_motion > MIN_DOWNWARD_MOTION or
                 horizontal_motion > MIN_HORIZONTAL_MOTION
@@ -121,7 +137,7 @@ class GestureWristProcessor:
                 (curr_3d_coords[2] - sh_wrl.z) ** 2
             )
 
-
+            # Check if all physical strike conditions are met
             if (self.smooth_norm_speed > SPEED_THRESHOLD and
                     self.prev_3d_coords is not None and
                     downward_motion > 0 and
@@ -136,8 +152,8 @@ class GestureWristProcessor:
                         wrist_3d    = curr_3d_coords,
                         time_ms     = cur_time_ms,
                     )
-                # ──────────────────────────────────────────────────────────────
         
+                # Calculate intersection with the 3D drum kit bounding boxes
                 hit_detected = kit.check_line_intersection(
                     self.prev_3d_coords,
                     curr_3d_coords,
@@ -156,13 +172,11 @@ class GestureWristProcessor:
                         wrist_3d    = curr_3d_coords,
                         time_ms     = cur_time_ms,
                     )
-                # ──────────────────────────────────────────────────────────────
         
-                #if hit_detected:  # [ DEBUG ]
                 self.last_hit_time = cur_time_ms
                 self.state = UP
 
-
+            # Check for return to UP state
             if upward_motion < MIN_UPWARD_MOTION:
                 self.state_change_frame += 1
                 if self.state_change_frame > STATE_CHANGE_FRAME_THRESHOLD:
@@ -183,7 +197,7 @@ class GestureWristProcessor:
         debug_info = {
             "pos_px":      (int(wrist_px[0]), int(wrist_px[1])),
             "sh_px":       (int(sh_scr.x * w), int(sh_scr.y * h)),
-            "z":           kz,              # filtered Z shown in overlay
+            "z":           kz,              
             "state":       "DOWN" if self.state == DOWN else "UP",
             "hit":         hit_detected,
             "debug_speed": self.smooth_norm_speed,
@@ -192,9 +206,8 @@ class GestureWristProcessor:
 
         return hit_detected, debug_info
 
-    # ─────────────────────────────────────────────────────────────────────
-
     def _empty_debug(self, wrist_px):
+        """Returns a blank debug dictionary for frames where tracking is lost."""
         return {
             "pos_px":      (int(wrist_px[0]), int(wrist_px[1])),
             "sh_px":       (0, 0),

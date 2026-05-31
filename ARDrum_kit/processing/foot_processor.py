@@ -5,7 +5,7 @@ DOWN = 1
 
 FOOT_SPEED_THRESHOLD           = 0.01
 FOOT_MIN_DOWNWARD_MOTION       = 0.01
-FOOT_HIT_DY_THRESHOLD         = 0.05    # normalised downward dy in a single frame to count as a hit
+FOOT_HIT_DY_THRESHOLD          = 0.05    # normalised downward dy in a single frame to count as a hit
 FOOT_COOLDOWN_MS               = 200     # minimum ms between consecutive bass hits
 FOOT_STATE_CHANGE_FRAME_THRESH = 1
 FOOT_MIN_UPWARD_MOTION         = -0.01
@@ -20,7 +20,6 @@ class GestureFootProcessor:
     A hit is emitted once when the ankle transitions into a downward press,
     then the processor stays in DOWN until the foot lifts or stalls.
     """
-
     def __init__(self, label: str):
         self.label              = label
         self.state              = UP

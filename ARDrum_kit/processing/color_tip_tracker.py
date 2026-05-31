@@ -1,9 +1,9 @@
-# color_tip_tracker.py
 import cv2
 import numpy as np
 import math
-from kalman_wrist import WristKalman
 
+# --- UPDATED IMPORT ---
+from ARDrum_kit.processing.kalman_wrist import WristKalman
 
 # Tune these HSV ranges per your tip color.
 # Run the helper at bottom to find your values.
@@ -15,7 +15,6 @@ TIP_PROFILES = {
     "orange": ([8,  150, 150], [20, 255, 255], None, None),
     "pink":   ([145, 80,  80], [165, 255, 255], None, None),
 }
-
 
 class ColorTipTracker:
     """
@@ -60,7 +59,6 @@ class ColorTipTracker:
         self._MAX_LOST = 6   # extrapolate for up to N frames then give up
 
     # ── Color blob detection ──────────────────────────────────────────────
-
     def _detect_tip_px(self, bgr_frame):
         """
         Returns (cx, cy) pixel of largest valid blob, or None.
@@ -95,18 +93,17 @@ class ColorTipTracker:
             return None, mask
         cx  = M["m10"] / M["m00"]
         cy  = M["m01"] / M["m00"]
-        print("[DEBUG] found a tip!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
+        
+        # Optional: Print statement removed to avoid console spam during live play
+        # print("[DEBUG] found a tip!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
+        
         return (cx, cy), mask
 
     # ── 3-D tip reconstruction ────────────────────────────────────────────
-
     def _solve_tip_3d(self, tip_px, wrist_world):
         """
         Intersects the camera ray through tip_px with a sphere of
         radius=stick_length centered at wrist_world.
-
-        Returns (x, y, z) in MediaPipe world space, or None if no
-        real solution exists (shouldn't happen with valid inputs).
         """
         wx, wy, wz = wrist_world
 
@@ -140,22 +137,7 @@ class ColorTipTracker:
         return (d*rx, d*ry, d*rz)
 
     # ── Main update ───────────────────────────────────────────────────────
-
     def update(self, bgr_frame, wrist_world):
-        """
-        Call once per frame.
-
-        Parameters
-        ----------
-        bgr_frame   : raw BGR camera frame (not flipped, matching MediaPipe)
-        wrist_world : (x, y, z) tuple from MediaPipe world landmarks
-
-        Returns
-        -------
-        tip_3d   : (x, y, z) smoothed world-space tip position, or None
-        tip_px   : (px, py)  screen pixel of tip, or None
-        dbg_mask : binary mask image for debug overlay
-        """
         tip_px, dbg_mask = self._detect_tip_px(bgr_frame)
 
         if tip_px is not None:
@@ -177,7 +159,6 @@ class ColorTipTracker:
         return None, None, dbg_mask
 
     # ── Debug drawing ─────────────────────────────────────────────────────
-
     def draw_debug(self, image, tip_px, tip_3d, color_bgr=(0, 255, 200)):
         if tip_px is None:
             return
@@ -193,18 +174,17 @@ class ColorTipTracker:
 
 # ── HSV calibration helper ────────────────────────────────────────────────────
 # Run this standalone to find HSV ranges for your tip color:
-#
-# if __name__ == "__main__":
-#     cap = cv2.VideoCapture(0)
-#     def nothing(x): pass
-#     cv2.namedWindow("Tune")
-#     for n, v in [("HL",0),("SL",0),("VL",0),("HH",179),("SH",255),("VH",255)]:
-#         cv2.createTrackbar(n, "Tune", v, 179 if n[0]=="H" else 255, nothing)
-#     while True:
-#         _, f = cap.read(); f = cv2.flip(f, 1)
-#         hsv = cv2.cvtColor(f, cv2.COLOR_BGR2HSV)
-#         lo = np.array([cv2.getTrackbarPos(n,"Tune") for n in ("HL","SL","VL")], np.uint8)
-#         hi = np.array([cv2.getTrackbarPos(n,"Tune") for n in ("HH","SH","VH")], np.uint8)
-#         mask = cv2.inRange(hsv, lo, hi)
-#         cv2.imshow("Tune", cv2.bitwise_and(f, f, mask=mask))
-#         if cv2.waitKey(1) == 27: break
+if __name__ == "__main__":
+    cap = cv2.VideoCapture(0)
+    def nothing(x): pass
+    cv2.namedWindow("Tune")
+    for n, v in [("HL",0),("SL",0),("VL",0),("HH",179),("SH",255),("VH",255)]:
+        cv2.createTrackbar(n, "Tune", v, 179 if n[0]=="H" else 255, nothing)
+    while True:
+        _, f = cap.read(); f = cv2.flip(f, 1)
+        hsv = cv2.cvtColor(f, cv2.COLOR_BGR2HSV)
+        lo = np.array([cv2.getTrackbarPos(n,"Tune") for n in ("HL","SL","VL")], np.uint8)
+        hi = np.array([cv2.getTrackbarPos(n,"Tune") for n in ("HH","SH","VH")], np.uint8)
+        mask = cv2.inRange(hsv, lo, hi)
+        cv2.imshow("Tune", cv2.bitwise_and(f, f, mask=mask))
+        if cv2.waitKey(1) == 27: break
