@@ -138,7 +138,7 @@ class CalibrationManager:
             rem = int(self.COUNTDOWN_SECONDS - elapsed)
             return f"READY IN: {rem}", self.error_msg
         else:
-            return "HOLD T-POSE...", self.error_msg
+            return "STAY STILL", self.error_msg
 
     def get_current_distance(self, current_sw_px):
         """Estimate live distance to user (metres) using pinhole camera model."""

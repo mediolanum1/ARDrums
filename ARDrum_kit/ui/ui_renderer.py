@@ -10,7 +10,9 @@ class UIRenderer:
         self.app_h = 950
         self.right_w = 640
         self.pov_h = 540
-        self.win_name = "AR Drum Kit"
+        self.win_name = "ARDrum"
+        cv2.namedWindow(self.win_name, cv2.WINDOW_NORMAL | cv2.WINDOW_KEEPRATIO)
+        cv2.setWindowProperty(self.win_name, cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
 
     def draw_combined_view(self, cam_img, pov_canvas, controls_panel, rhythm_overlay_text=None):
         """Assembles the 3 panels into the final window."""
@@ -19,15 +21,15 @@ class UIRenderer:
         
         combined = np.zeros((self.app_h, total_w, 3), dtype=np.uint8)
 
-        # 1. Main Camera View (Left side)
+        #  main camera panel
         cam = cv2.resize(cam_img, (cam_w, self.app_h))
-        if rhythm_overlay_text:
+        if rhythm_overlay_text: 
             cv2.putText(cam, rhythm_overlay_text, (12, self.app_h - 16),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 230, 200), 2)
         combined[:, :cam_w] = cam
         cv2.line(combined, (cam_w, 0), (cam_w, self.app_h), (40, 40, 40), 2)
 
-        # 2. POV Window (Top Right)
+        # pov window panel
         if pov_canvas is not None:
             pov_resized = cv2.resize(pov_canvas, (self.right_w, self.pov_h))
         else:
@@ -39,7 +41,7 @@ class UIRenderer:
         combined[:self.pov_h, cam_w:] = pov_resized
         cv2.line(combined, (cam_w, self.pov_h), (total_w, self.pov_h), (40, 40, 40), 2)
 
-        # 3. Controls Panel (Bottom Right)
+        # controls panel
         if controls_panel is not None:
             ctrl_h = self.app_h - self.pov_h
             ctrl_resized = cv2.resize(controls_panel, (self.right_w, ctrl_h))
@@ -52,7 +54,7 @@ class UIRenderer:
         w = self.right_w
         h = self.app_h - self.pov_h
         
-        # Extract variables from state_dict safely
+        # getting vars from app state dict
         dbg_l = state_dict.get("dbg_l")
         dbg_r = state_dict.get("dbg_r")
         dbg_foot = state_dict.get("dbg_foot")
@@ -62,7 +64,7 @@ class UIRenderer:
         cv2.rectangle(panel, (0, 0), (w, 32), (24, 28, 42), -1)
         cv2.putText(panel, "CONTROLS", (14, 22), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 210, 210), 1)
 
-        # Distance logic
+        # print the distance from user to camera 
         dist_m = state_dict.get("dist_m")
         if dist_m is not None:
             dist_txt = f"Distance: {dist_m:.2f} m"
@@ -77,7 +79,7 @@ class UIRenderer:
         cv2.putText(panel, dist_txt, ((w - ts[0]) // 2, 54),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.55, dist_col, 1)
 
-        # Build Keyboard mappings dynamically from state
+        # control buttons
         keys = [
             ("[D]",   "Toggle drums",   state_dict.get("show_drums", True)),
             ("[N]",   "Drum names",     state_dict.get("show_drum_names", True)),

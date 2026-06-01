@@ -23,7 +23,7 @@ class VirtualDrumKit:
         # ─── Drum Layout & Config ───
         self.drums = {
             "Snare": {
-                "center": ( 0.00, -0.10, -0.36), "radii": (0.22, 0.1, 0.12), "color_idle": (200, 200, 200), 
+                "center": ( 0.00, -0.10, -0.2, "radii": (0.22, 0.1, 0.12), "color_idle": (200, 200, 200), 
                 "sound_path": f"{base_dir}/sounds/snare.mp3", 
                 "sound_path_quiet": f"{base_dir}/sounds/snare_quiet.mp3"
             },
