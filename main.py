@@ -59,7 +59,7 @@ class ARDrumApp:
         self.result_queue = queue.Queue(maxsize=2)
         self.running      = True
         self.freeze_drums = True
-        self.cap          = cv2.VideoCapture(0)
+        self.cap          = cv2.VideoCapture(1)
         self.frame_width  = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         self.frame_height = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
         self._clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
@@ -444,7 +444,7 @@ class ARDrumApp:
                     if (self.rhythm_session is not None and
                             not self.rhythm_session.is_active):
                         self.rhythm_session.print_summary()
-                        self.rhythm_session.save("results/rhythm_session_with_feet_5.json")
+                        self.rhythm_session.save("results/rhythm_session_gunak_2_5dz.json")
                         self.rhythm_session = None 
                     self.kit.active_stick_ext = (0.0, 0.0, 0.0)
                     self.prev_gray = gray

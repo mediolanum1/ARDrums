@@ -22,27 +22,27 @@ class VirtualDrumKit:
 
         self.drums = {
             "Snare": {
-                "center": ( 0.00, -0.10, -0.36), "radii": (0.22, 0.1, 0.12), "color_idle": (200, 200, 200), 
+                "center": ( 0.00, -0.10, -0.36), "radii": (0.22, 0.1, 0.20), "color_idle": (200, 200, 200), 
                 "sound_path": "sounds/snare.mp3", 
                 "sound_path_quiet": "sounds/snare_quiet.mp3"
             },
             "Hi-Hat": {
-                "center": (-0.44, -0.28, -0.36), "radii": (0.15, 0.06, 0.12), "color_idle": (0,   200, 255), 
+                "center": (-0.44, -0.28, -0.36), "radii": (0.15, 0.06, 0.20), "color_idle": (0,   200, 255), 
                 "sound_path": "sounds/hi_hat.mp3", 
                 "sound_path_quiet": "sounds/hi_hat_quiet.mp3"
             },
             "High Tom": {
-                "center": (-0.15, -0.35, -0.39), "radii": (0.14, 0.06, 0.1), "color_idle": (255, 100, 100), 
+                "center": (-0.15, -0.35, -0.39), "radii": (0.14, 0.06, 0.15), "color_idle": (255, 100, 100), 
                 "sound_path": "sounds/high_tom.mp3", 
                 "sound_path_quiet": "sounds/high_tom_quiet.mp3"
             },
             "Mid Tom": {
-                "center": ( 0.15, -0.35, -0.39), "radii": (0.14, 0.06, 0.1), "color_idle": (255, 100, 100), 
+                "center": ( 0.15, -0.35, -0.39), "radii": (0.14, 0.06, 0.15), "color_idle": (255, 100, 100), 
                 "sound_path": "sounds/middle_tom.mp3", 
                 "sound_path_quiet": "sounds/middle_tom_quiet.mp3"
             },
             "Ride Cymbal": {
-                "center": ( 0.55, -0.40, -0.38), "radii": (0.20, 0.07, 0.12), "color_idle": (0,   215, 255), 
+                "center": ( 0.55, -0.40, -0.38), "radii": (0.20, 0.07, 0.15), "color_idle": (0,   215, 255), 
                 "sound_path": "sounds/ride_cymbal.mp3", 
                 "sound_path_quiet": "sounds/ride_cymbal_quiet.mp3"
             },

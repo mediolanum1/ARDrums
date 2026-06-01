@@ -145,3 +145,9 @@ class CalibrationManager:
         if not self.is_calibrated or current_sw_px <= 0 or self.fixed_sw_m <= 0:
             return None
         return (self.focal_length * self.fixed_sw_m) / current_sw_px
+
+    def get_live_metric_to_px_scale(self, current_sw_px):
+        """Return the current pixel-to-meter scale using the live shoulder width."""
+        if not self.is_calibrated or current_sw_px <= 0 or self.fixed_sw_m <= 0:
+            return self.metric_to_px_scale
+        return current_sw_px / self.fixed_sw_m

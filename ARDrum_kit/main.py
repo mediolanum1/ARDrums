@@ -127,10 +127,12 @@ class ARDrumApp:
                     # Update dynamic UI state (like distance)
                     current_sw_px = math.hypot((s_lm[11].x - s_lm[12].x) * dims[0], (s_lm[11].y - s_lm[12].y) * dims[1])
                     render_state["dist_m"] = self.calibration.get_current_distance(current_sw_px)
+                    live_metric_to_px_scale = self.calibration.get_live_metric_to_px_scale(current_sw_px)
+                    self.calibration.metric_to_px_scale = live_metric_to_px_scale
 
                     # 1. Depth Processing (Kinematic Override)
                     w_lm_eff, stats_payload = self.depth_manager.process_kinematic_depth(
-                        s_lm, w_lm, self.depth_estimator, self.calibration.metric_to_px_scale
+                        s_lm, w_lm, self.depth_estimator, live_metric_to_px_scale
                     )
                     self.stats.add_depth_stats(stats_payload)
 
