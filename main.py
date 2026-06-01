@@ -66,6 +66,10 @@ class ARDrumApp:
         self.kit = VirtualDrumKit()
         self.ui = UIRenderer(self.camera.frame_width, self.camera.frame_height, self.focal_length)
 
+        self._last_l_hit = 0
+        self._last_r_hit = 0
+        self._last_foot_hit = 0
+        
     def start(self):
         self.camera.start()
         self.pose_tracker.start()
@@ -89,11 +93,11 @@ class ARDrumApp:
                 s_lm = result.pose_landmarks[0]
                 w_lm = result.pose_world_landmarks[0]
 
-                # calibration Phase 
+                # calibration phase 
                 if not self.calibration.is_calibrated:
                     self.calibration.update(s_lm, w_lm, self.depth_estimator)
                     
-                   
+                   # get the text to display depedning on calibration state 
                     status_txt, err_txt = self.calibration.get_ui_text()
                     if status_txt:
                         cv2.putText(image, status_txt, (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
@@ -102,14 +106,14 @@ class ARDrumApp:
                         
                     self.ui.draw_combined_view(image, None, None)
 
-                # post-Calibration Phase
+                # main running code aftrer calibration
                 else:
-                    # getting depth estimation and outputting it to the UI
+                    # get distance from user to camera estimation and output it on UI 
                     current_sw_px = math.hypot((s_lm[11].x - s_lm[12].x) * self.dims[0], (s_lm[11].y - s_lm[12].y) * self.dims[1])
                     render_state["dist_m"] = self.calibration.get_current_distance(current_sw_px)
 
+                    # this is only if drums are not frozen 
                     if not self.state.freeze_drums or not self.kit.pixel_positions:
-                        
                         torso_cx = int(((s_lm[23].x + s_lm[24].x) / 2) * self.dims[0])
                         torso_cy = int(((s_lm[23].y + s_lm[24].y) / 2) * self.dims[1])
                         
@@ -124,6 +128,8 @@ class ARDrumApp:
                     w_lm_eff, stats_payload = self.depth_manager.process_kinematic_depth(
                         s_lm, w_lm, self.depth_estimator, self.calibration.metric_to_px_scale
                     )
+
+                    # since we collect every N seconds to compare the depth models 
                     if stats_payload is not None:
                         self.stats.add_depth_stats(stats_payload)
 
@@ -165,8 +171,9 @@ class ARDrumApp:
                         self._last_foot_hit = cur_time
                         render_state["last_foot_hit_time"] = cur_time
 
+                    # draw hand points on UI
                     self.ui.draw_2d_overlays(image, dbg_l, dbg_r, dbg_foot, self.state.show_coords)
-                    # ------
+                
                     # drawing UI canvases and passing to comined view to render
                     pov_canvas = None
                     if self.state.show_pov:

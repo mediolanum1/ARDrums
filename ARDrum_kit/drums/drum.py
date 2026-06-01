@@ -3,7 +3,7 @@ import os
 import pygame
 
 class VirtualDrumKit:
-    def __init__(self, base_dir="drums"):
+    def __init__(self, base_dir="ARDrum_kit/drums"):
         """
         Manages the 3D layout, 2D pixel projections, and dual-layered audio 
         playback for the AR Drum Kit.
@@ -18,37 +18,43 @@ class VirtualDrumKit:
       
         # Velocity thresholds based on 'smooth_norm_speed'
         self.MIN_SPEED = 0.015  # Softest hit
-        self.MAX_SPEED = 0.12   # Hardest hit
+        self.MAX_SPEED = 0.15   # Hardest hit
+        
+        try:
+            pygame.mixer.pre_init(...)
+            pygame.init()
+        except Exception as e:
+            print(f"[AUDIO] Pygame mixer failed...")
 
-        # ─── Drum Layout & Config ───
+  
         self.drums = {
             "Snare": {
-                "center": ( 0.00, -0.10, -0.2, "radii": (0.22, 0.1, 0.12), "color_idle": (200, 200, 200), 
+                "center": ( 0.00, -0.10, -0.2), "radii": (0.22, 0.1, 0.12), "color_idle": (200, 200, 200), 
                 "sound_path": f"{base_dir}/sounds/snare.mp3", 
                 "sound_path_quiet": f"{base_dir}/sounds/snare_quiet.mp3"
             },
             "Hi-Hat": {
-                "center": (-0.44, -0.28, -0.36), "radii": (0.15, 0.06, 0.12), "color_idle": (0,   200, 255), 
+                "center": (-0.44, -0.28, -0.2), "radii": (0.15, 0.06, 0.12), "color_idle": (0,   200, 255), 
                 "sound_path": f"{base_dir}/sounds/hi_hat.mp3", 
                 "sound_path_quiet": f"{base_dir}/sounds/hi_hat_quiet.mp3"
             },
             "High Tom": {
-                "center": (-0.15, -0.35, -0.39), "radii": (0.14, 0.06, 0.1), "color_idle": (255, 100, 100), 
+                "center": (-0.15, -0.35, -0.33), "radii": (0.14, 0.06, 0.1), "color_idle": (255, 100, 100), 
                 "sound_path": f"{base_dir}/sounds/high_tom.mp3", 
                 "sound_path_quiet": f"{base_dir}/sounds/high_tom_quiet.mp3"
             },
             "Mid Tom": {
-                "center": ( 0.15, -0.35, -0.39), "radii": (0.14, 0.06, 0.1), "color_idle": (255, 100, 100), 
+                "center": ( 0.15, -0.35, -0.33), "radii": (0.14, 0.06, 0.1), "color_idle": (255, 100, 100), 
                 "sound_path": f"{base_dir}/sounds/middle_tom.mp3", 
                 "sound_path_quiet": f"{base_dir}/sounds/middle_tom_quiet.mp3"
             },
             "Ride Cymbal": {
-                "center": ( 0.55, -0.40, -0.38), "radii": (0.20, 0.07, 0.12), "color_idle": (0,   215, 255), 
+                "center": ( 0.55, -0.40, -0.33), "radii": (0.20, 0.07, 0.12), "color_idle": (0,   215, 255), 
                 "sound_path": f"{base_dir}/sounds/ride_cymbal.mp3", 
                 "sound_path_quiet": f"{base_dir}/sounds/ride_cymbal_quiet.mp3"
             },
             "Crash Cymbal": {
-                "center": (-0.30, -0.60, -0.42), "radii": (0.20, 0.07, 0.1), "color_idle": (0,   215, 255), 
+                "center": (-0.30, -0.60, -0.36), "radii": (0.20, 0.07, 0.1), "color_idle": (0,   215, 255), 
                 "sound_path": f"{base_dir}/sounds/high_crash_cymbal.mp3", 
                 "sound_path_quiet": f"{base_dir}/sounds/high_crash_cymbal_quiet.mp3"
             },
