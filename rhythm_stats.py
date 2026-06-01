@@ -73,7 +73,9 @@ PHASE_DURATION_S = 15.0          # seconds per phase
 BPM_SLOW         = 60            # phase-1 tempo
 BPM_FAST         = 90            # phase-2 tempo
 BEAT_WINDOW_MS   = 150           # ±ms: "on beat" tolerance window
-
+COUNTDOWN_S      = 5.0           # warmup countdown before slow phase
+FAST_COUNTDOWN_S = 4.0           # pre-fast countdown before 90 BPM
+BREAK_S          = 3.0           # rest break between phases in seconds
 
 # ── Data containers ───────────────────────────────────────────────────────────
 
@@ -197,18 +199,26 @@ class RhythmSession:
         phase_duration_s: float = PHASE_DURATION_S,
         beat_window_ms:   float = BEAT_WINDOW_MS,
         click_sound_path: Optional[str] = None,
+        countdown_s:      float = COUNTDOWN_S,
+        fast_countdown_s: float = FAST_COUNTDOWN_S,
+        break_s:          float = BREAK_S,
     ):
         self._phases_cfg = [
             ("Slow", float(bpm_slow),  float(phase_duration_s)),
             ("Fast", float(bpm_fast),  float(phase_duration_s)),
         ]
         self._beat_window_ms = beat_window_ms
+        self._countdown_s = countdown_s
+        self._fast_countdown_s = fast_countdown_s
+        self._break_s     = break_s
 
         # Populated as each phase begins
         self._phases: List[PhaseStats] = []
         self._current_phase: Optional[PhaseStats] = None
         self._beat_times_ms: List[float] = []   # beats fired so far in this phase
         self._phase_end_time: float      = 0.0
+        self._countdown_end_time: float = 0.0
+        self._in_countdown: bool        = False
 
         self._session_active = False
         self._lock           = threading.Lock()
@@ -272,17 +282,83 @@ class RhythmSession:
         """One-liner for camera overlay: e.g. 'RHYTHM  Slow 60 BPM  12.3 s'"""
         if not self._session_active:
             return ""
+
+        with self._lock:
+            in_countdown = self._in_countdown
+            countdown_rem = max(0.0, self._countdown_end_time - time.time())
+
+        if in_countdown:
+            count_int = max(1, int(countdown_rem) + 1)
+            return f"RHYTHM  Starting in {count_int}..."
+
         label = self.phase_label()
         bpm   = self.current_bpm()
         rem   = self.time_remaining_s()
         return f"RHYTHM  {label} {int(bpm)} BPM  {rem:.1f} s"
 
+    def _run_countdown(self, bpm: float, duration_s: float, description: str):
+        """Run a click countdown for the specified tempo and exact duration."""
+        interval_s = 60.0 / bpm
+        start = time.time()
+        end = start + duration_s
+
+        print(f"[RHYTHM] ⏱ {description} ({bpm:.0f} BPM) for {duration_s:.0f} s...")
+
+        # Schedule all exact-multiple clicks, then ensure a final click at countdown end.
+        click_times = []
+        i = 1
+        while True:
+            target_t = start + i * interval_s
+            if target_t >= end:
+                break
+            click_times.append(target_t)
+            i += 1
+        click_times.append(end)
+
+        for target_t in click_times:
+            sleep_t = target_t - time.time()
+            if sleep_t > 0:
+                time.sleep(sleep_t)
+
+            if self._click_sound:
+                self._click_sound.play()
+
+        with self._lock:
+            self._countdown_end_time = end
+
+        return end
+
     # ── Background metronome thread ───────────────────────────────────────────
 
     def _run(self):
-        for label, bpm, dur in self._phases_cfg:
+        # Initial warmup countdown at slow tempo before the first phase.
+        with self._lock:
+            self._in_countdown = True
+            self._countdown_end_time = time.time() + self._countdown_s
+        self._run_countdown(BPM_SLOW, self._countdown_s, "Warmup countdown")
+        with self._lock:
+            self._in_countdown = False
+
+        for phase_idx, (label, bpm, dur) in enumerate(self._phases_cfg):
+            if label == "Fast":
+                # Rest break before the fast phase.
+                print(f"[RHYTHM] ⏸ Rest break {self._break_s:.0f} seconds...")
+                with self._lock:
+                    self._current_phase = None
+                time.sleep(self._break_s)
+
+                # Countdown at the fast tempo so the first fast beat starts immediately.
+                with self._lock:
+                    self._in_countdown = True
+                    self._countdown_end_time = time.time() + self._fast_countdown_s
+                self._run_countdown(bpm, self._fast_countdown_s, "Pre-fast countdown")
+                with self._lock:
+                    self._in_countdown = False
+
             beat_interval_s = 60.0 / bpm
             n_beats         = int(dur / beat_interval_s)
+
+            phase_start = self._countdown_end_time if phase_idx in (0, 1) else time.time()
 
             phase = PhaseStats(
                 label          = label,
@@ -295,12 +371,11 @@ class RhythmSession:
                 self._phases.append(phase)
                 self._current_phase = phase
                 self._beat_times_ms = []
-                self._phase_end_time = time.time() + dur
+                self._phase_end_time = phase_start + dur
 
             print(f"[RHYTHM] ▶ Phase '{label}' — {bpm:.0f} BPM  "
                   f"({n_beats} beats over {dur:.0f} s)")
 
-            phase_start = time.time()
             for beat_idx in range(n_beats):
                 target_t = phase_start + beat_idx * beat_interval_s
                 sleep_t  = target_t - time.time()
@@ -312,7 +387,9 @@ class RhythmSession:
                     self._beat_times_ms.append(beat_ms)
 
                 if self._click_sound:
-                    self._click_sound.play()
+                    # Skip playing duplicate click for the first beat immediately after a countdown.
+                    if not (beat_idx == 0 and phase_idx in (0, 1)):
+                        self._click_sound.play()
 
             # Drain remaining phase time (last beat may fire slightly early)
             leftover = self._phase_end_time - time.time()
