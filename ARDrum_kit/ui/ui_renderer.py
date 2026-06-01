@@ -291,3 +291,30 @@ class UIRenderer:
                         cv2.FONT_HERSHEY_SIMPLEX, 0.50, foot_col, 1)
 
         return canvas
+    
+    def draw_2d_overlays(self, image, dbg_l, dbg_r, dbg_foot, show_coords=False):
+        """Restores the 2D tracking circles on the webcam feed."""
+        # Draw Arms
+        for dbg, color in [(dbg_l, (255, 0, 0)), (dbg_r, (0, 0, 255))]:
+            if dbg:
+                px = dbg["pos_px"]
+                cv2.circle(image, px, 15, (0, 255, 0) if dbg["hit"] else color, -1)
+                if show_coords:
+                    cv2.putText(image, f"STATE:{dbg['state']} Z:{dbg['z']:.2f}",
+                                (px[0] - 40, px[1] - 40), 0, 1.2, (0, 0, 255), 2)
+        
+        # Draw Foot
+        if dbg_foot:
+            px = dbg_foot["pos_px"]
+            is_hit = bool(dbg_foot.get("hit"))
+            is_pressing = dbg_foot.get("state") == "DOWN"
+
+            ring_col = (0, 130, 255) if is_pressing else (80, 60, 30)
+            cv2.circle(image, px, 20, ring_col, 2)
+
+            dot_col = (0, 200, 255) if is_hit else (180, 100, 30)
+            cv2.circle(image, px, 10, dot_col, -1)
+
+            if is_hit:
+                cv2.putText(image, "KICK", (px[0] - 20, px[1] - 28),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 200, 255), 2)

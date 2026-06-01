@@ -107,11 +107,24 @@ class ARDrumApp:
                     current_sw_px = math.hypot((s_lm[11].x - s_lm[12].x) * dims[0], (s_lm[11].y - s_lm[12].y) * dims[1])
                     render_state["dist_m"] = self.calibration.get_current_distance(current_sw_px)
 
+                    if not self.state.freeze_drums or not self.kit.pixel_positions:
+                        
+                        torso_cx = int(((s_lm[23].x + s_lm[24].x) / 2) * self.dims[0])
+                        torso_cy = int(((s_lm[23].y + s_lm[24].y) / 2) * self.dims[1])
+                        
+                        # Only check ankle visibility if we are actually updating the layout
+                        ankle_pos = None
+                        if s_lm[27].visibility > 0.3:
+                            ankle_pos = (s_lm[27].x * self.dims[0], s_lm[27].y * self.dims[1])
+
+                        self.kit.update_layout(torso_cx, torso_cy, self.calibration.metric_to_px_scale, ankle_pos)
+                 
                     # getting depth estimation from anatomic estimator 
                     w_lm_eff, stats_payload = self.depth_manager.process_kinematic_depth(
                         s_lm, w_lm, self.depth_estimator, self.calibration.metric_to_px_scale
                     )
-                    self.stats.add_depth_stats(stats_payload)
+                    if stats_payload is not None:
+                        self.stats.add_depth_stats(stats_payload)
 
                     # optional for if stick mode 
                     wrist_l_world = (w_lm_eff[15].x, w_lm_eff[15].y, w_lm_eff[15].z)
@@ -141,10 +154,18 @@ class ARDrumApp:
                     render_state["dbg_l"] = dbg_l
                     render_state["dbg_r"] = dbg_r
                     render_state["dbg_foot"] = dbg_foot
-                    if hit_l: render_state["last_l_hit_time"] = cur_time
-                    if hit_r: render_state["last_r_hit_time"] = cur_time
-                    if hit_foot: render_state["last_foot_hit_time"] = cur_time
+                    if hit_l: 
+                        self._last_l_hit = cur_time
+                        render_state["last_l_hit_time"] = cur_time
+                    if hit_r: 
+                        self._last_r_hit = cur_time
+                        render_state["last_r_hit_time"] = cur_time
+                    if hit_foot: 
+                        self._last_foot_hit = cur_time
+                        render_state["last_foot_hit_time"] = cur_time
 
+                    self.ui.draw_2d_overlays(image, dbg_l, dbg_r, dbg_foot, self.state.show_coords)
+                    # ------
                     # drawing UI canvases and passing to comined view to render
                     pov_canvas = None
                     if self.state.show_pov:

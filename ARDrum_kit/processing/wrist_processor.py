@@ -2,7 +2,7 @@ import math
 from typing import Optional
 
 # Ensure this imports correctly based on your new folder structure
-from ARDrum_kit.processing.kalman_wrist import WristKalman
+from processing.kalman_wrist import WristKalman
 
 # ─── Gesture State Constants ───
 UP = 0
