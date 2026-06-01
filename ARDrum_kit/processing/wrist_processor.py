@@ -13,7 +13,7 @@ SPEED_THRESHOLD              = 0.015
 COOLDOWN_MS                  = 100
 STATE_CHANGE_FRAME_THRESHOLD = 1
 MIN_DOWNWARD_MOTION          = 0.01
-MIN_HORIZONTAL_MOTION        = 0.04
+MIN_HORIZONTAL_MOTION        = 0.02
 MIN_UPWARD_MOTION            = -0.01
 STALL_RESET_FRAME_THRESHOLD  = 12
 STALL_SPEED_THRESHOLD        = 0.008
@@ -33,7 +33,7 @@ class GestureWristProcessor:
         self.last_hit_time = 0
         
         # Minimum physical distance from shoulder to wrist to register a hit (~28 cm)
-        self.MIN_ARM_EXTENSION_M = 0.32   
+        self.MIN_ARM_EXTENSION_M = 0.18  
         self.WORLD_Y_STRIKE_THRESHOLD = 0.003  # ~8 mm downward in world metres
         
         self.prev_wrist_px   = None
