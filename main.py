@@ -45,6 +45,7 @@ class ARDrumApp:
         self.running = True
 
         self.camera = CameraManager()
+        self.dims = (self.camera.frame_width, self.camera.frame_height)
         self.pose_tracker = PoseTracker(self.camera.frame_queue)
         
         self.focal_length = (self.camera.frame_width / 2) / math.tan(math.radians(60.0) / 2)
@@ -80,7 +81,7 @@ class ARDrumApp:
                 
             image, result, cur_time = result_data
             cur_time_ms = int(cur_time * 1000)
-            dims = (self.camera.frame_width, self.camera.frame_height)
+            
 
             render_state = self._build_render_state(cur_time)
 
@@ -104,7 +105,7 @@ class ARDrumApp:
                 # post-Calibration Phase
                 else:
                     # getting depth estimation and outputting it to the UI
-                    current_sw_px = math.hypot((s_lm[11].x - s_lm[12].x) * dims[0], (s_lm[11].y - s_lm[12].y) * dims[1])
+                    current_sw_px = math.hypot((s_lm[11].x - s_lm[12].x) * self.dims[0], (s_lm[11].y - s_lm[12].y) * self.dims[1])
                     render_state["dist_m"] = self.calibration.get_current_distance(current_sw_px)
 
                     if not self.state.freeze_drums or not self.kit.pixel_positions:
@@ -139,15 +140,15 @@ class ARDrumApp:
                     # hit detection 
                     hit_l, dbg_l = self.left_arm.process(
                         s_lm[15], w_lm_eff[15], s_lm[11], w_lm_eff[11], s_lm[13], 1.0, 
-                        self.kit, cur_time_ms, dims, s_lm[12], mediapipe_present=True
+                        self.kit, cur_time_ms, self.dims, s_lm[12], mediapipe_present=True
                     )
                     hit_r, dbg_r = self.right_arm.process(
                         s_lm[16], w_lm_eff[16], s_lm[12], w_lm_eff[12], s_lm[14], 1.0, 
-                        self.kit, cur_time_ms, dims, s_lm[11], mediapipe_present=True
+                        self.kit, cur_time_ms, self.dims, s_lm[11], mediapipe_present=True
                     )
                     hit_foot, dbg_foot = self.foot.process(
                         s_lm[27], w_lm_eff[27], s_lm[23], s_lm[24], 
-                        self.kit, cur_time_ms, dims, mediapipe_present=(s_lm[27].visibility > 0.3)
+                        self.kit, cur_time_ms, self.dims, mediapipe_present=(s_lm[27].visibility > 0.3)
                     )
 
                     # updating render state 

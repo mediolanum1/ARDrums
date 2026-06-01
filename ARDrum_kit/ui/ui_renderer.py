@@ -125,6 +125,28 @@ class UIRenderer:
 
         return panel
 
+    def draw_2d_overlays(self, image, dbg_l, dbg_r, dbg_foot, show_coords=False):
+        """Restores the 2D tracking circles on the webcam feed."""
+        for dbg, color in [(dbg_l, (255, 0, 0)), (dbg_r, (0, 0, 255))]:
+            if dbg:
+                px = dbg["pos_px"]
+                cv2.circle(image, px, 15, (0, 255, 0) if dbg["hit"] else color, -1)
+                if show_coords:
+                    cv2.putText(image, f"STATE:{dbg['state']} Z:{dbg['z']:.2f}",
+                                (px[0] - 40, px[1] - 40), 0, 1.2, (0, 0, 255), 2)
+        
+        if dbg_foot:
+            px = dbg_foot["pos_px"]
+            is_hit = bool(dbg_foot.get("hit"))
+            is_pressing = dbg_foot.get("state") == "DOWN"
+            ring_col = (0, 130, 255) if is_pressing else (80, 60, 30)
+            cv2.circle(image, px, 20, ring_col, 2)
+            dot_col = (0, 200, 255) if is_hit else (180, 100, 30)
+            cv2.circle(image, px, 10, dot_col, -1)
+            if is_hit:
+                cv2.putText(image, "KICK", (px[0] - 20, px[1] - 28),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 200, 255), 2)
+
     def render_pov_canvas(self, kit, w_lm_eff, cur_time, dbg_l, dbg_r, dbg_foot, fixed_sw_m, state_dict):
         """Builds the 3D projected perspective."""
         _POV_REN_W = 800
@@ -150,19 +172,19 @@ class UIRenderer:
 
         rq = []
 
-        # Ground grid
+        # Ground grid (Forced to the absolute bottom layer)
         XS = [-1.1, -0.7, -0.28, 0, 0.28, 0.7, 1.1]
         ZS = [-0.15, -0.35, -0.55, -0.75, -0.95, -1.15]
         GRID_Y = 0.65
 
         for gx in XS:
             p1 = project(gx, GRID_Y, ZS[0]);  p2 = project(gx, GRID_Y, ZS[-1])
-            rq.append({"t":"line","depth":(p1[2]+p2[2])/2,"p1":p1[:2],"p2":p2[:2],"color":(30,42,58),"w":1})
+            rq.append({"t":"line", "depth": -100, "p1":p1[:2], "p2":p2[:2], "color":(30,42,58), "w":1})
         for gz in ZS:
             p1 = project(XS[0], GRID_Y, gz);  p2 = project(XS[-1], GRID_Y, gz)
-            rq.append({"t":"line","depth":(p1[2]+p2[2])/2,"p1":p1[:2],"p2":p2[:2],"color":(30,42,58),"w":1})
+            rq.append({"t":"line", "depth": -100, "p1":p1[:2], "p2":p2[:2], "color":(30,42,58), "w":1})
 
-        # Drums
+        # Drums (Sorted by physical World Z coordinate!)
         for name, props in kit.drums.items():
             cx, cy, cz = props["center"]
             is_hit = (
@@ -171,7 +193,7 @@ class UIRenderer:
                 cur_time - kit.last_hit_time["RF"].get(name, 0) < 0.20
             )
             col = (0, 240, 60) if is_hit else props["color_idle"]
-            ppx, ppy, depth, dist = project(cx, cy, cz)
+            ppx, ppy, z_rot, dist = project(cx, cy, cz)
             rx_m, ry_m, rz_m = props["radii"]
 
             if name == "Bass Drum":
@@ -179,17 +201,17 @@ class UIRenderer:
                 rx    = max(int((rx_m * SCALE) / dist), 4)
                 ry    = max(int((rx_m * cos_p * SCALE) / dist), 4)
                 thick = max(int((visual_thickness_m * SCALE) / dist), 2)
-                rq.append({"t":"bass_drum","depth":depth,"name":"BD",
-                           "px":ppx,"py":ppy,"rx":rx,"ry":ry,"thick":thick,"col":col})
+                rq.append({"t":"bass_drum", "depth": cz, "name":"BD",
+                           "px":ppx, "py":ppy, "rx":rx, "ry":ry, "thick":thick, "col":col})
             else:
                 visual_thickness_m = 0.02 if "Cymbal" in name or "Hi-Hat" in name else 0.12
                 rx    = max(int((rx_m * SCALE) / dist), 4)
                 ry    = max(int((ry_m * SCALE) / dist), 2)
                 thick = max(int((visual_thickness_m * SCALE) / dist), 2)
-                rq.append({"t":"drum","depth":depth,"name":name[:3].upper(),
-                           "px":ppx,"py":ppy,"rx":rx,"ry":ry,"thick":thick,"col":col})
+                rq.append({"t":"drum", "depth": cz, "name":name[:3].upper(),
+                           "px":ppx, "py":ppy, "rx":rx, "ry":ry, "thick":thick, "col":col})
 
-        # Arms
+        # Arms (Forced Z-index boost of +10 to ALWAYS draw on top of drums)
         if w_lm_eff and fixed_sw_m > 0:
             arm_defs = [
                 (w_lm_eff[11], w_lm_eff[13], w_lm_eff[15], w_lm_eff[19], dbg_l, (100, 220, 255)),
@@ -204,15 +226,15 @@ class UIRenderer:
                 fi3 = (fi_w.x, fi_w.y, fi_w.z)
                 
                 sh_p, el_p, wr_p = project(*sh3), project(*el3), project(*wr3)
-                
                 line_w = max(2, int(8 / el_p[3]))
-                rq.append({"t":"line","depth":(sh_p[2]+el_p[2])/2,"p1":sh_p[:2],"p2":el_p[:2],"color":arm_col,"w":line_w})
-                rq.append({"t":"line","depth":(el_p[2]+wr_p[2])/2,"p1":el_p[:2],"p2":wr_p[:2],"color":arm_col,"w":line_w})
+                
+                rq.append({"t":"line", "depth": ((sh3[2]+el3[2])/2) + 10, "p1":sh_p[:2], "p2":el_p[:2], "color":arm_col, "w":line_w})
+                rq.append({"t":"line", "depth": ((el3[2]+wr3[2])/2) + 10, "p1":el_p[:2], "p2":wr_p[:2], "color":arm_col, "w":line_w})
                 
                 rad_sh = max(3, int(10 / sh_p[3]))
                 rad_el = max(2, int( 8 / el_p[3]))
-                rq.append({"t":"dot","depth":sh_p[2],"px":sh_p[0],"py":sh_p[1],"col":arm_col,"r":rad_sh})
-                rq.append({"t":"dot","depth":el_p[2],"px":el_p[0],"py":el_p[1],"col":arm_col,"r":rad_el})
+                rq.append({"t":"dot", "depth": sh3[2] + 10, "px":sh_p[0], "py":sh_p[1], "col":arm_col, "r":rad_sh})
+                rq.append({"t":"dot", "depth": el3[2] + 10, "px":el_p[0], "py":el_p[1], "col":arm_col, "r":rad_el})
 
                 # Virtual Drumsticks
                 fw_x = fi3[0]-wr3[0]; fw_y = fi3[1]-wr3[1]; fw_z = fi3[2]-wr3[2]
@@ -225,14 +247,15 @@ class UIRenderer:
                     tp_p = project(*tip3)
                     stick_w = max(1, int(6 / tp_p[3]))
                     tip_r   = max(2, int(10 / tp_p[3]))
-                    rq.append({"t":"line","depth":(wr_p[2]+tp_p[2])/2,"p1":wr_p[:2],"p2":tp_p[:2],"color":(255,220,50),"w":stick_w})
-                    rq.append({"t":"dot","depth":tp_p[2],"px":tp_p[0],"py":tp_p[1],"col":(255,220,50),"r":tip_r})
+                    
+                    rq.append({"t":"line", "depth": ((wr3[2]+tip3[2])/2) + 10, "p1":wr_p[:2], "p2":tp_p[:2], "color":(255,220,50), "w":stick_w})
+                    rq.append({"t":"dot", "depth": tip3[2] + 10, "px":tp_p[0], "py":tp_p[1], "col":(255,220,50), "r":tip_r})
 
                 is_hit_wrist = dbg.get("hit", False) if dbg else False
                 wrist_col    = (0, 255, 60) if is_hit_wrist else arm_col
                 rad_wr = max(4, int(14 / wr_p[3]))
-                rq.append({"t":"hand","depth":wr_p[2],"px":wr_p[0],"py":wr_p[1],
-                           "col":wrist_col,"state":dbg.get("state","") if dbg else "","r":rad_wr})
+                rq.append({"t":"hand", "depth": wr3[2] + 10, "px":wr_p[0], "py":wr_p[1],
+                           "col":wrist_col, "state":dbg.get("state","") if dbg else "", "r":rad_wr})
 
         # Render Queue processing
         rq.sort(key=lambda i: i["depth"])
@@ -291,30 +314,3 @@ class UIRenderer:
                         cv2.FONT_HERSHEY_SIMPLEX, 0.50, foot_col, 1)
 
         return canvas
-    
-    def draw_2d_overlays(self, image, dbg_l, dbg_r, dbg_foot, show_coords=False):
-        """Restores the 2D tracking circles on the webcam feed."""
-        # Draw Arms
-        for dbg, color in [(dbg_l, (255, 0, 0)), (dbg_r, (0, 0, 255))]:
-            if dbg:
-                px = dbg["pos_px"]
-                cv2.circle(image, px, 15, (0, 255, 0) if dbg["hit"] else color, -1)
-                if show_coords:
-                    cv2.putText(image, f"STATE:{dbg['state']} Z:{dbg['z']:.2f}",
-                                (px[0] - 40, px[1] - 40), 0, 1.2, (0, 0, 255), 2)
-        
-        # Draw Foot
-        if dbg_foot:
-            px = dbg_foot["pos_px"]
-            is_hit = bool(dbg_foot.get("hit"))
-            is_pressing = dbg_foot.get("state") == "DOWN"
-
-            ring_col = (0, 130, 255) if is_pressing else (80, 60, 30)
-            cv2.circle(image, px, 20, ring_col, 2)
-
-            dot_col = (0, 200, 255) if is_hit else (180, 100, 30)
-            cv2.circle(image, px, 10, dot_col, -1)
-
-            if is_hit:
-                cv2.putText(image, "KICK", (px[0] - 20, px[1] - 28),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 200, 255), 2)

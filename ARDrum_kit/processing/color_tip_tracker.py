@@ -3,7 +3,7 @@ import numpy as np
 import math
 
 # --- UPDATED IMPORT ---
-from processing.kalman_wrist import WristKalman
+from ARDrum_kit.processing.kalman_wrist import WristKalman
 
 # Tune these HSV ranges per your tip color.
 # Run the helper at bottom to find your values.

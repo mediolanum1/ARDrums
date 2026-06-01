@@ -7,7 +7,7 @@ import queue
 import time
 import cv2
 import numpy as np
-from utils.preprocessing import Preprocessor
+from ARDrum_kit.utils.preprocessing import Preprocessor
 
 class PoseTracker:
     # 1. Accept the camera queue as an argument
