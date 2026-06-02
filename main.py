@@ -108,12 +108,20 @@ class ARDrumApp:
 
                 # main running code aftrer calibration
                 else:
-                    # get distance from user to camera estimation and output it on UI 
-                    current_sw_px = math.hypot((s_lm[11].x - s_lm[12].x) * self.dims[0], (s_lm[11].y - s_lm[12].y) * self.dims[1])
-                    render_state["dist_m"] = self.calibration.get_current_distance(current_sw_px)
+                    # 1. Grab the raw distance between shoulders
+                    raw_sw_px = max(1.0, math.hypot((s_lm[11].x - s_lm[12].x) * self.dims[0], (s_lm[11].y - s_lm[12].y) * self.dims[1]))
+                    
+                    # 2. Smooth it using an Exponential Moving Average (EMA)
+                    # 80% old smooth value, 20% new raw values
+                    if not hasattr(self, '_smoothed_sw_px'):
+                        self._smoothed_sw_px = raw_sw_px
+                    else:
+                        self._smoothed_sw_px = (self._smoothed_sw_px * 0.85) + (raw_sw_px * 0.15)
 
+                    # 3. Use the SMOOTHED value for all distance and scale math
+                    render_state["dist_m"] = self.calibration.get_current_distance(self._smoothed_sw_px)
                     self.calibration.metric_to_px_scale = (
-                        current_sw_px / self.calibration.fixed_sw_m if self.calibration.fixed_sw_m > 0 else 1.0
+                        self._smoothed_sw_px / self.calibration.fixed_sw_m if self.calibration.fixed_sw_m > 0 else 1.0
                     )
                     
                     # this is only if drums are not frozen 

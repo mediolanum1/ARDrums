@@ -240,7 +240,7 @@ class UIRenderer:
                 rq.append({"t":"drum", "depth": cz, "name":name[:3].upper(),
                            "px":ppx, "py":ppy, "rx":rx, "ry":ry, "thick":thick, "col":col})
 
-        # Arms (Forced Z-index boost of +10 to ALWAYS draw on top of drums)
+        # Arms (Restored proper Z-Rot perspective sorting + Kalman smoothing)
         if w_lm_eff and fixed_sw_m > 0:
             arm_defs = [
                 (w_lm_eff[11], w_lm_eff[13], w_lm_eff[15], w_lm_eff[19], dbg_l, (100, 220, 255)),
@@ -271,13 +271,14 @@ class UIRenderer:
                 sh_p, el_p, wr_p = project(*sh3), project(*el3), project(*wr3)
                 line_w = max(2, int(8 / el_p[3]))
                 
-                rq.append({"t":"line", "depth": ((sh3[2]+el3[2])/2) + 10, "p1":sh_p[:2], "p2":el_p[:2], "color":arm_col, "w":line_w})
-                rq.append({"t":"line", "depth": ((el3[2]+wr3[2])/2) + 10, "p1":el_p[:2], "p2":wr_p[:2], "color":arm_col, "w":line_w})
+                # Reverted depth tags back to proper projection (e.g. sh_p[2]) to fix the 3D perspective!
+                rq.append({"t":"line", "depth": (sh_p[2]+el_p[2])/2, "p1":sh_p[:2], "p2":el_p[:2], "color":arm_col, "w":line_w})
+                rq.append({"t":"line", "depth": (el_p[2]+wr_p[2])/2, "p1":el_p[:2], "p2":wr_p[:2], "color":arm_col, "w":line_w})
                 
                 rad_sh = max(3, int(10 / sh_p[3]))
                 rad_el = max(2, int( 8 / el_p[3]))
-                rq.append({"t":"dot", "depth": sh3[2] + 10, "px":sh_p[0], "py":sh_p[1], "col":arm_col, "r":rad_sh})
-                rq.append({"t":"dot", "depth": el3[2] + 10, "px":el_p[0], "py":el_p[1], "col":arm_col, "r":rad_el})
+                rq.append({"t":"dot", "depth": sh_p[2], "px":sh_p[0], "py":sh_p[1], "col":arm_col, "r":rad_sh})
+                rq.append({"t":"dot", "depth": el_p[2], "px":el_p[0], "py":el_p[1], "col":arm_col, "r":rad_el})
 
                 # Virtual Drumsticks
                 fw_x = fi3[0]-wr3[0]; fw_y = fi3[1]-wr3[1]; fw_z = fi3[2]-wr3[2]
@@ -291,13 +292,13 @@ class UIRenderer:
                     stick_w = max(1, int(6 / tp_p[3]))
                     tip_r   = max(2, int(10 / tp_p[3]))
                     
-                    rq.append({"t":"line", "depth": ((wr3[2]+tip3[2])/2) + 10, "p1":wr_p[:2], "p2":tp_p[:2], "color":(255,220,50), "w":stick_w})
-                    rq.append({"t":"dot", "depth": tip3[2] + 10, "px":tp_p[0], "py":tp_p[1], "col":(255,220,50), "r":tip_r})
+                    rq.append({"t":"line", "depth": (wr_p[2]+tp_p[2])/2, "p1":wr_p[:2], "p2":tp_p[:2], "color":(255,220,50), "w":stick_w})
+                    rq.append({"t":"dot", "depth": tp_p[2], "px":tp_p[0], "py":tp_p[1], "col":(255,220,50), "r":tip_r})
 
                 is_hit_wrist = dbg.get("hit", False) if dbg else False
                 wrist_col    = (0, 255, 60) if is_hit_wrist else arm_col
                 rad_wr = max(4, int(14 / wr_p[3]))
-                rq.append({"t":"hand", "depth": wr3[2] + 10, "px":wr_p[0], "py":wr_p[1],
+                rq.append({"t":"hand", "depth": wr_p[2], "px":wr_p[0], "py":wr_p[1],
                            "col":wrist_col, "state":dbg.get("state","") if dbg else "", "r":rad_wr})
 
         # Render Queue processing

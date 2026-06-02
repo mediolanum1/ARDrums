@@ -11,7 +11,7 @@ class _LM:
         self.visibility = getattr(lm, "visibility", 1.0)
         self.presence   = getattr(lm, "presence", 1.0)
 
-
+        
 class DepthManager:
     def __init__(self, frame_width, frame_height):
         """
@@ -22,7 +22,9 @@ class DepthManager:
         self.frame_height = frame_height
         self.depth_boost_weight = 0.0
         
-        # ─── NEW: Stats Throttling Variables ───
+        self._smoothed_l_sh_z = None
+        self._smoothed_r_sh_z = None
+
         self.last_stats_time = 0.0
         self.STATS_INTERVAL_SEC = 2.0  
 
@@ -31,8 +33,18 @@ class DepthManager:
         
         def to_px(lm):
             return (lm.x * self.frame_width, lm.y * self.frame_height)
-
-        # --- LEFT ARM ---
+        
+        raw_l_z = w_lm_eff[11].z
+        raw_r_z = w_lm_eff[12].z
+        
+        if self._smoothed_l_sh_z is None:
+            self._smoothed_l_sh_z = raw_l_z
+            self._smoothed_r_sh_z = raw_r_z
+        else:
+            # 80% history, 20% new input
+            self._smoothed_l_sh_z = (self._smoothed_l_sh_z * 0.8) + (raw_l_z * 0.2)
+            self._smoothed_r_sh_z = (self._smoothed_r_sh_z * 0.8) + (raw_r_z * 0.2)
+    
         l_sh_px = to_px(s_lm[11])
         l_el_px = to_px(s_lm[13])
         l_wr_px = to_px(s_lm[15])
