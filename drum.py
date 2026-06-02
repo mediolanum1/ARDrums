@@ -1,5 +1,6 @@
 import math
 import os
+import time
 import pygame
 
 
@@ -10,7 +11,12 @@ class VirtualDrumKit:
         self.use_sticks       = False
         self.active_stick_ext = (0.0, 0.0, 0.0)
         self.pixel_positions  = {}
-        self.last_hit_time = {"L": {}, "R": {}, "RF":{}}
+        self.last_hit_time = {"L": {}, "R": {}, "RF": {}}
+        self.last_hit_latency_ms = {
+            "left_wrist": None,
+            "right_wrist": None,
+            "kick": None,
+        }
       
         # Define these thresholds based on your typical 'smooth_norm_speed' values
         self.MIN_SPEED = 0.015  # Softest hit
@@ -107,7 +113,7 @@ class VirtualDrumKit:
 
     # ── Bass-drum trigger (called by GestureFootProcessor) ────────────────────
     def trigger_bass_drum(self, cur_time: float, smooth_norm_speed: float,
-                          hand_id: str = "RF") -> str | None:
+                          hand_id: str = "RF", hit_detect_start: float | None = None) -> str | None:
         
         drum_name = "Bass Drum"
         if cur_time - self.last_hit_time[hand_id].get(drum_name, 0.0) <= self.hit_cooldown:
@@ -122,10 +128,13 @@ class VirtualDrumKit:
         if drum_name in target_dict:
             sound = target_dict[drum_name]
             sound.set_volume(volume)
+            if hit_detect_start is None:
+                hit_detect_start = time.perf_counter()
             sound.play()
+            latency_ms = (time.perf_counter() - hit_detect_start) * 1000.0
+            self.last_hit_latency_ms["kick"] = latency_ms
 
         return drum_name
-
 
     @staticmethod
     def _segment_hits_ellipse(px0, py0, px1, py1, cx, cy, rx, ry):
@@ -158,7 +167,7 @@ class VirtualDrumKit:
 
 
     def check_line_intersection(self, p_prev, p_curr, cur_time, smooth_norm_speed,
-                                 px_prev, px_curr, hand_id="R"):
+                                 px_prev, px_curr, hand_id="R", hit_detect_start: float | None = None):
         x0, y0, z0 = p_prev
         x1, y1, z1 = p_curr
 
@@ -206,7 +215,12 @@ class VirtualDrumKit:
                 if drum_name in target_dict:
                     sound = target_dict[drum_name]
                     sound.set_volume(volume)
+                    if hit_detect_start is None:
+                        hit_detect_start = time.perf_counter()
                     sound.play()
+                    latency_ms = (time.perf_counter() - hit_detect_start) * 1000.0
+                    wrist_key = "left_wrist" if hand_id == "L" else "right_wrist" if hand_id == "R" else f"{hand_id.lower()}_wrist"
+                    self.last_hit_latency_ms[wrist_key] = latency_ms
                     
                 return drum_name
 

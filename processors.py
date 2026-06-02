@@ -1,4 +1,5 @@
 import math
+import time
 
 UP = 0
 DOWN = 1
@@ -78,6 +79,7 @@ class GestureWristProcessor:
 
         # ── State machine ─────────────────────────────────────────────────────
         hit_detected = None
+        latency_ms = None
 
         if self.state == UP:
             if raw_norm_speed > SPEED_THRESHOLD and (
@@ -111,6 +113,7 @@ class GestureWristProcessor:
                     world_y_delta < -self.WORLD_Y_STRIKE_THRESHOLD and   # <-- downward = negative Y delta in world coords
                     sw_dist > self.MIN_ARM_EXTENSION_M and    
                     (cur_time_ms - self.last_hit_time) > COOLDOWN_MS):
+                hit_detect_start = time.perf_counter()
                 hit_detected = kit.check_line_intersection(
                     self.prev_3d_coords,
                     curr_3d_coords,
@@ -118,10 +121,13 @@ class GestureWristProcessor:
                     self.smooth_norm_speed,
                     self.prev_wrist_px,   # screen pixels, previous frame
                     wrist_px,         # screen pixels, current frame
-                    self.label
+                    self.label,
+                    hit_detect_start=hit_detect_start,
                 )
 
                 if hit_detected:
+                    wrist_key = "left_wrist" if self.label == "L" else "right_wrist" if self.label == "R" else f"{self.label.lower()}_wrist"
+                    latency_ms = getattr(kit, "last_hit_latency_ms", {}).get(wrist_key)
                     self.last_hit_time = cur_time_ms
                     self.state = UP
 
@@ -148,6 +154,7 @@ class GestureWristProcessor:
             "z":           w_wrl.z,
             "state":       "DOWN" if self.state == DOWN else "UP",
             "hit":         hit_detected,
+            "latency_ms":  latency_ms,
             "debug_speed": self.smooth_norm_speed,
             # Raw 3-D world position straight from MediaPipe
             "norm_3d":     curr_3d_coords,

@@ -79,6 +79,7 @@ class ARDrumApp:
         self.show_drum_names   = True
         self.show_flow         = False
         self.show_pov          = True
+        self.show_latency      = True
         self.rhythm_session: Optional[RhythmSession] = None
         self.optical_flow_enabled = True
         self.prev_gray           = None
@@ -101,6 +102,9 @@ class ARDrumApp:
         self.last_l_hit_time    = 0
         self.last_r_hit_time    = 0
         self.last_foot_hit_time = 0
+        self.latency_display_until = 0.0
+        self.latency_display_duration = 0.8
+        self.show_latency = False
 
         self.program_start_time = time.time()
         self.COUNTDOWN_SECONDS  = 5
@@ -463,9 +467,15 @@ class ARDrumApp:
                         mediapipe_present = (s_lm[27].visibility > 0.3),
                     )
 
-                    if hit_l:    self.last_l_hit_time    = cur_time
-                    if hit_r:    self.last_r_hit_time    = cur_time
-                    if hit_foot: self.last_foot_hit_time = cur_time
+                    if hit_l:
+                        self.last_l_hit_time = cur_time
+                        self.latency_display_until = cur_time + self.latency_display_duration
+                    if hit_r:
+                        self.last_r_hit_time = cur_time
+                        self.latency_display_until = cur_time + self.latency_display_duration
+                    if hit_foot:
+                        self.last_foot_hit_time = cur_time
+                        self.latency_display_until = cur_time + self.latency_display_duration
 
                     self._draw_arm_debug(image, dbg_l, (255, 0, 0))
                     self._draw_arm_debug(image, dbg_r, (0, 0, 255))
@@ -496,6 +506,7 @@ class ARDrumApp:
             elif key == ord("n"): self.show_drum_names   = not self.show_drum_names
             elif key == ord("o"): self.show_flow         = not self.show_flow
             elif key == ord("p"): self.show_pov          = not self.show_pov
+            elif key == ord("l"): self.show_latency      = not self.show_latency
             elif key == ord("s"):
                 self.stick_mode     = not self.stick_mode
                 self.kit.use_sticks = self.stick_mode
@@ -540,10 +551,33 @@ class ARDrumApp:
 
         cam = cv2.resize(cam_img, (cam_w, APP_H))
         if self.rhythm_session and self.rhythm_session.is_active:
-         overlay = self.rhythm_session.overlay_text()
-         cv2.putText(cam, overlay, (12, APP_H - 16),
-                     cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 230, 200), 2)
- 
+            overlay = self.rhythm_session.overlay_text()
+            cv2.putText(cam, overlay, (12, APP_H - 16),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 230, 200), 2)
+
+        if self.show_latency and time.time() <= self.latency_display_until:
+            left_ms = self.kit.last_hit_latency_ms.get("left_wrist")
+            right_ms = self.kit.last_hit_latency_ms.get("right_wrist")
+            kick_ms = self.kit.last_hit_latency_ms.get("kick")
+            if left_ms is not None or right_ms is not None or kick_ms is not None:
+                left_text = f"LEFT WRIST: {left_ms:.2f} ms" if left_ms is not None else "LEFT WRIST: --"
+                right_text = f"RIGHT WRIST: {right_ms:.2f} ms" if right_ms is not None else "RIGHT WRIST: --"
+                kick_text = f"KICK: {kick_ms:.2f} ms" if kick_ms is not None else "KICK: --"
+                latency_text = f"{left_text}   {right_text}   {kick_text}"
+                font = cv2.FONT_HERSHEY_SIMPLEX
+                scale = 1.0
+                thickness = 3
+                text_size = cv2.getTextSize(latency_text, font, scale, thickness)[0]
+                box_height = text_size[1] + 18
+                box_width = text_size[0] + 28
+                x0 = 14
+                y0 = APP_H - box_height - 10
+                x1 = x0 + box_width
+                y1 = APP_H - 8
+                cv2.rectangle(cam, (x0 - 8, y0 - 8), (x1 + 8, y1 + 8), (0, 0, 0), -1)
+                cv2.rectangle(cam, (x0 - 8, y0 - 8), (x1 + 8, y1 + 8), (255, 255, 255), 1)
+                cv2.putText(cam, latency_text, (x0, y1 - 6), font, scale,
+                            (255, 255, 255), thickness, cv2.LINE_AA)
 
         combined[:, :cam_w] = cam
         cv2.line(combined, (cam_w, 0), (cam_w, APP_H), (40, 40, 40), 2)
@@ -602,6 +636,7 @@ class ARDrumApp:
             ("[D]",   "Toggle drums",   self.show_drums),
             ("[N]",   "Drum names",     self.show_drum_names),
             ("[P]",   "POV window",     self.show_pov),
+            ("[L]",   "Latency display", self.show_latency),
             ("[S]",   "Stick mode",     self.stick_mode),
             ("[C]",   "Coords overlay", self.show_coords),
             ("[F]",   "Freeze drums",   self.freeze_drums),
@@ -1129,6 +1164,12 @@ class ARDrumApp:
                 threading.Thread(target=self.depth_thread, args=(pipe,), daemon=True).start()
         else:
             self._depth_status_msg = ""
+
+        cv2.namedWindow(WIN_NAME, cv2.WINDOW_NORMAL)
+        try:
+            cv2.setWindowProperty(WIN_NAME, cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
+        except Exception:
+            pass
 
         self.main_render_loop()
         self.cap.release()

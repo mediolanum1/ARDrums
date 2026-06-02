@@ -1,4 +1,5 @@
 import math
+import time
 
 UP = 0
 DOWN = 1
@@ -71,6 +72,7 @@ class GestureFootProcessor:
         upward_motion = norm_dy
 
         hit_detected = None
+        latency_ms = None
 
         if self.state == UP:
             if (self.smooth_norm_speed > FOOT_SPEED_THRESHOLD and
@@ -82,13 +84,16 @@ class GestureFootProcessor:
                     if (self.smooth_norm_speed > FOOT_SPEED_THRESHOLD and
                             downward_motion > FOOT_HIT_DY_THRESHOLD and
                             cur_time_ms - self.last_hit_time > FOOT_COOLDOWN_MS):
+                        hit_detect_start = time.perf_counter()
                         hit_detected = kit.trigger_bass_drum(
                             cur_time          = cur_time_ms / 1000.0,
                             smooth_norm_speed = self.smooth_norm_speed,
                             hand_id           = self.label,
+                            hit_detect_start  = hit_detect_start,
                         )
                         if hit_detected:
                             self.last_hit_time = cur_time_ms
+                            latency_ms = getattr(kit, "last_hit_latency_ms", {}).get("kick")
             else:
                 self.state_change_frame = 0
 
@@ -96,13 +101,16 @@ class GestureFootProcessor:
             if (self.smooth_norm_speed > FOOT_SPEED_THRESHOLD and
                     downward_motion > FOOT_HIT_DY_THRESHOLD and
                     cur_time_ms - self.last_hit_time > FOOT_COOLDOWN_MS):
+                hit_detect_start = time.perf_counter()
                 hit_detected = kit.trigger_bass_drum(
                     cur_time          = cur_time_ms / 1000.0,
                     smooth_norm_speed = self.smooth_norm_speed,
                     hand_id           = self.label,
+                    hit_detect_start  = hit_detect_start,
                 )
                 if hit_detected:
                     self.last_hit_time = cur_time_ms
+                    latency_ms = getattr(kit, "last_hit_latency_ms", {}).get("kick")
 
             if upward_motion < FOOT_MIN_UPWARD_MOTION:
                 self.state_change_frame += 1
@@ -123,6 +131,7 @@ class GestureFootProcessor:
             "pos_px":      (int(ankle_px[0]), int(ankle_px[1])),
             "state":       "DOWN" if self.state == DOWN else "UP",
             "hit":         hit_detected,
+            "latency_ms":  latency_ms,
             "debug_speed": self.smooth_norm_speed,
             "norm_3d":     (ankle_wrl.x, ankle_wrl.y, ankle_wrl.z),
         }

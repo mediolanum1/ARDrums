@@ -1,4 +1,5 @@
 import math
+import time
 
 from kalman_wrist import WristKalman
 from typing import Optional
@@ -97,6 +98,7 @@ class GestureWristProcessor:
 
         # ── State machine ─────────────────────────────────────────────────
         hit_detected = None
+        latency_ms = None
 
         if self.state == UP:
             if raw_norm_speed > SPEED_THRESHOLD and (
@@ -138,6 +140,7 @@ class GestureWristProcessor:
                     )
                 # ──────────────────────────────────────────────────────────────
         
+                hit_detect_start = time.perf_counter()
                 hit_detected = kit.check_line_intersection(
                     self.prev_3d_coords,
                     curr_3d_coords,
@@ -146,7 +149,11 @@ class GestureWristProcessor:
                     self.prev_wrist_px,
                     wrist_px,
                     self.label,
+                    hit_detect_start=hit_detect_start,
                 )
+                if hit_detected:
+                    wrist_key = "left_wrist" if self.label == "L" else "right_wrist" if self.label == "R" else f"{self.label.lower()}_wrist"
+                    latency_ms = getattr(kit, "last_hit_latency_ms", {}).get(wrist_key)
         
                 # ── Rhythm-stats hook: 3D result ───────────────────────────────
                 if rhythm_session is not None:
@@ -186,6 +193,7 @@ class GestureWristProcessor:
             "z":           kz,              # filtered Z shown in overlay
             "state":       "DOWN" if self.state == DOWN else "UP",
             "hit":         hit_detected,
+            "latency_ms":  latency_ms,
             "debug_speed": self.smooth_norm_speed,
             "norm_3d":     curr_3d_coords,
         }
