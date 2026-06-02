@@ -21,7 +21,7 @@ class KinematicDepthEstimator:
         self.l_forearm = forearm_m
         self.is_calibrated = True
 
-    def estimate_chain_z(self, shoulder_px, elbow_px, wrist_px, metric_to_px_scale, shoulder_z=0.0):
+    def estimate_chain_z(self, shoulder_px, elbow_px, wrist_px, metric_to_px_scale, mp_elbow_z=0.0, mp_wrist_z=0.0, shoulder_z=0.0):
         """
         Calculates the exact Z depth of the elbow and wrist by measuring how much
         the 2D on-screen lengths have foreshortened compared to the true physical lengths.
@@ -45,8 +45,15 @@ class KinematicDepthEstimator:
         dz_forearm = math.sqrt(max(0, self.l_forearm**2 - p_forearm_m**2))
 
         # 4. Chain them together
-        # In MediaPipe, -Z moves towards the camera. Arms generally point forward.
+        # In MediaPipe, -Z moves towards the camera. Arms generally point forward
+        # .
         elbow_z = shoulder_z - dz_upper
-        wrist_z = elbow_z - dz_forearm
+
+        # {idk about this} this is experimental, basically if wrist is closer then elbwo to body ,then here calc is wrong
+        #wrist_z = elbow_z - dz_forearm 
+
+        sign = 1 if mp_wrist_z > mp_elbow_z else -1
+        wrist_z = elbow_z + sign * dz_forearm
+
 
         return elbow_z, wrist_z
