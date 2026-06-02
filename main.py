@@ -112,6 +112,10 @@ class ARDrumApp:
                     current_sw_px = math.hypot((s_lm[11].x - s_lm[12].x) * self.dims[0], (s_lm[11].y - s_lm[12].y) * self.dims[1])
                     render_state["dist_m"] = self.calibration.get_current_distance(current_sw_px)
 
+                    self.calibration.metric_to_px_scale = (
+                        current_sw_px / self.calibration.fixed_sw_m if self.calibration.fixed_sw_m > 0 else 1.0
+                    )
+                    
                     # this is only if drums are not frozen 
                     if not self.state.freeze_drums or not self.kit.pixel_positions:
                         torso_cx = int(((s_lm[23].x + s_lm[24].x) / 2) * self.dims[0])
@@ -171,6 +175,8 @@ class ARDrumApp:
                         self._last_foot_hit = cur_time
                         render_state["last_foot_hit_time"] = cur_time
 
+                    if self.state.show_drums:
+                        self.ui.draw_drums_2d(image, self.kit, cur_time, self.state.show_drum_names)
                     # draw hand points on UI
                     self.ui.draw_2d_overlays(image, dbg_l, dbg_r, dbg_foot, self.state.show_coords)
                 

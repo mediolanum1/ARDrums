@@ -10,7 +10,9 @@ class UIRenderer:
         self.app_h = 950
         self.right_w = 640
         self.pov_h = 540
-        self.win_name = "ARDrum"
+        self.win_name = "AR Drum Kit"
+
+        # --- FULL SCREEN CONFIGURATION ---
         cv2.namedWindow(self.win_name, cv2.WINDOW_NORMAL | cv2.WINDOW_KEEPRATIO)
         cv2.setWindowProperty(self.win_name, cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
 
@@ -21,15 +23,15 @@ class UIRenderer:
         
         combined = np.zeros((self.app_h, total_w, 3), dtype=np.uint8)
 
-        #  main camera panel
+        # 1. Main Camera View (Left side)
         cam = cv2.resize(cam_img, (cam_w, self.app_h))
-        if rhythm_overlay_text: 
+        if rhythm_overlay_text:
             cv2.putText(cam, rhythm_overlay_text, (12, self.app_h - 16),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 230, 200), 2)
         combined[:, :cam_w] = cam
         cv2.line(combined, (cam_w, 0), (cam_w, self.app_h), (40, 40, 40), 2)
 
-        # pov window panel
+        # 2. POV Window (Top Right)
         if pov_canvas is not None:
             pov_resized = cv2.resize(pov_canvas, (self.right_w, self.pov_h))
         else:
@@ -41,7 +43,7 @@ class UIRenderer:
         combined[:self.pov_h, cam_w:] = pov_resized
         cv2.line(combined, (cam_w, self.pov_h), (total_w, self.pov_h), (40, 40, 40), 2)
 
-        # controls panel
+        # 3. Controls Panel (Bottom Right)
         if controls_panel is not None:
             ctrl_h = self.app_h - self.pov_h
             ctrl_resized = cv2.resize(controls_panel, (self.right_w, ctrl_h))
@@ -54,7 +56,6 @@ class UIRenderer:
         w = self.right_w
         h = self.app_h - self.pov_h
         
-        # getting vars from app state dict
         dbg_l = state_dict.get("dbg_l")
         dbg_r = state_dict.get("dbg_r")
         dbg_foot = state_dict.get("dbg_foot")
@@ -64,7 +65,7 @@ class UIRenderer:
         cv2.rectangle(panel, (0, 0), (w, 32), (24, 28, 42), -1)
         cv2.putText(panel, "CONTROLS", (14, 22), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 210, 210), 1)
 
-        # print the distance from user to camera 
+        # Distance logic
         dist_m = state_dict.get("dist_m")
         if dist_m is not None:
             dist_txt = f"Distance: {dist_m:.2f} m"
@@ -79,7 +80,7 @@ class UIRenderer:
         cv2.putText(panel, dist_txt, ((w - ts[0]) // 2, 54),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.55, dist_col, 1)
 
-        # control buttons
+        # Build Keyboard mappings dynamically from state
         keys = [
             ("[D]",   "Toggle drums",   state_dict.get("show_drums", True)),
             ("[N]",   "Drum names",     state_dict.get("show_drum_names", True)),
@@ -148,6 +149,32 @@ class UIRenderer:
             if is_hit:
                 cv2.putText(image, "KICK", (px[0] - 20, px[1] - 28),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 200, 255), 2)
+
+    def draw_drums_2d(self, image, kit, cur_time, show_drum_names=True):
+        """Draws the 2D drum ellipses directly onto the webcam feed."""
+        if not kit.pixel_positions:
+            return
+            
+        overlay = image.copy()
+        for name, pos in kit.pixel_positions.items():
+            is_hit = (
+                cur_time - kit.last_hit_time["L"].get(name, 0) < 0.2 or
+                cur_time - kit.last_hit_time["R"].get(name, 0) < 0.2 or
+                cur_time - kit.last_hit_time["RF"].get(name, 0) < 0.2
+            )
+            color = (0, 255, 0) if is_hit else kit.drums[name]["color_idle"]
+            cv2.ellipse(overlay, (pos["cx"], pos["cy"]),
+                        (max(pos["rx"], 4), max(pos["ry"], 2)), 0, 0, 360, color, -1)
+                        
+        cv2.addWeighted(overlay, 0.5, image, 0.5, 0, image)
+
+        if show_drum_names:
+            for name, pos in kit.pixel_positions.items():
+                label = name.upper()
+                ts = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.8, 2)[0]
+                tx, ty = pos["cx"] - ts[0] // 2, pos["cy"] + ts[1] // 2
+                cv2.putText(image, label, (tx, ty), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 0), 4)
+                cv2.putText(image, label, (tx, ty), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
 
     def render_pov_canvas(self, kit, w_lm_eff, cur_time, dbg_l, dbg_r, dbg_foot, fixed_sw_m, state_dict):
         """Builds the 3D projected perspective."""
@@ -224,8 +251,22 @@ class UIRenderer:
                     continue
                 sh3 = (sh_w.x, sh_w.y, sh_w.z)
                 el3 = (el_w.x, el_w.y, el_w.z)
-                wr3 = (wr_w.x, wr_w.y, wr_w.z)
-                fi3 = (fi_w.x, fi_w.y, fi_w.z)
+                
+                # ---> THE KALMAN VISUAL FIX <---
+                raw_wr3 = (wr_w.x, wr_w.y, wr_w.z)
+                raw_fi3 = (fi_w.x, fi_w.y, fi_w.z)
+                
+                if dbg and "norm_3d" in dbg:
+                    # 1. Grab the buttery-smooth Kalman wrist coordinates
+                    wr3 = dbg["norm_3d"]
+                    
+                    # 2. Shift the fingers by the exact same smoothed delta so the hand doesn't shatter
+                    dx, dy, dz = wr3[0] - raw_wr3[0], wr3[1] - raw_wr3[1], wr3[2] - raw_wr3[2]
+                    fi3 = (raw_fi3[0] + dx, raw_fi3[1] + dy, raw_fi3[2] + dz)
+                else:
+                    wr3 = raw_wr3
+                    fi3 = raw_fi3
+                # -------------------------------
                 
                 sh_p, el_p, wr_p = project(*sh3), project(*el3), project(*wr3)
                 line_w = max(2, int(8 / el_p[3]))

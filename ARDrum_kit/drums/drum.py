@@ -29,22 +29,22 @@ class VirtualDrumKit:
   
         self.drums = {
             "Snare": {
-                "center": ( 0.00, -0.10, -0.2), "radii": (0.22, 0.1, 0.12), "color_idle": (200, 200, 200), 
+                "center": ( 0.00, -0.10, -0.27), "radii": (0.22, 0.1, 0.12), "color_idle": (200, 200, 200), 
                 "sound_path": f"{base_dir}/sounds/snare.mp3", 
                 "sound_path_quiet": f"{base_dir}/sounds/snare_quiet.mp3"
             },
             "Hi-Hat": {
-                "center": (-0.44, -0.28, -0.2), "radii": (0.15, 0.06, 0.12), "color_idle": (0,   200, 255), 
+                "center": (-0.44, -0.28, -0.3), "radii": (0.15, 0.06, 0.12), "color_idle": (0,   200, 255), 
                 "sound_path": f"{base_dir}/sounds/hi_hat.mp3", 
                 "sound_path_quiet": f"{base_dir}/sounds/hi_hat_quiet.mp3"
             },
             "High Tom": {
-                "center": (-0.15, -0.35, -0.33), "radii": (0.14, 0.06, 0.1), "color_idle": (255, 100, 100), 
+                "center": (-0.15, -0.35, -0.38), "radii": (0.14, 0.06, 0.1), "color_idle": (255, 100, 100), 
                 "sound_path": f"{base_dir}/sounds/high_tom.mp3", 
                 "sound_path_quiet": f"{base_dir}/sounds/high_tom_quiet.mp3"
             },
             "Mid Tom": {
-                "center": ( 0.15, -0.35, -0.33), "radii": (0.14, 0.06, 0.1), "color_idle": (255, 100, 100), 
+                "center": ( 0.15, -0.35, -0.38), "radii": (0.14, 0.06, 0.1), "color_idle": (255, 100, 100), 
                 "sound_path": f"{base_dir}/sounds/middle_tom.mp3", 
                 "sound_path_quiet": f"{base_dir}/sounds/middle_tom_quiet.mp3"
             },
@@ -54,12 +54,12 @@ class VirtualDrumKit:
                 "sound_path_quiet": f"{base_dir}/sounds/ride_cymbal_quiet.mp3"
             },
             "Crash Cymbal": {
-                "center": (-0.30, -0.60, -0.36), "radii": (0.20, 0.07, 0.1), "color_idle": (0,   215, 255), 
+                "center": (-0.30, -0.60, -0.33), "radii": (0.20, 0.07, 0.1), "color_idle": (0,   215, 255), 
                 "sound_path": f"{base_dir}/sounds/high_crash_cymbal.mp3", 
                 "sound_path_quiet": f"{base_dir}/sounds/high_crash_cymbal_quiet.mp3"
             },
             "Bass Drum": {
-                "center": ( 0.10,  0.1, -0.25), "radii": (0.22, 0.22, 0.10), "color_idle": (220,  90,  30), 
+                "center": ( 0.10,  0, -0.25), "radii": (0.22, 0.22, 0.10), "color_idle": (220,  90,  30), 
                 "sound_path": f"{base_dir}/sounds/kick.mp3", 
                 "sound_path_quiet": f"{base_dir}/sounds/kick_quiet.mp3"
             },

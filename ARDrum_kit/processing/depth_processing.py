@@ -27,12 +27,6 @@ class DepthManager:
         self.STATS_INTERVAL_SEC = 2.0  
 
     def process_kinematic_depth(self, s_lm, w_lm, anatomical_estimator, metric_to_px_scale):
-        """
-        Applies anatomical foreshortening math to correct the Z-coordinate 
-        of the elbows and wrists. Tracks statistical differences between models.
-        
-        :returns: (patched_world_landmarks, stats_payload_dict_or_None)
-        """
         w_lm_eff = list(w_lm)
         
         def to_px(lm):
@@ -50,8 +44,12 @@ class DepthManager:
             l_sh_px, l_el_px, l_wr_px, metric_to_px_scale, shoulder_z=w_lm_eff[11].z
         )
         
+        # FIX: Calculate delta and move fingers
+        l_wrist_dz = l_wr_geom_z - mp_l_wrist_z
         w_lm_eff[13] = _LM(w_lm_eff[13], z=l_el_geom_z)
         w_lm_eff[15] = _LM(w_lm_eff[15], z=l_wr_geom_z)
+        for idx in [17, 19, 21]:
+            w_lm_eff[idx] = _LM(w_lm_eff[idx], z=w_lm_eff[idx].z + l_wrist_dz)
 
         # --- RIGHT ARM ---
         r_sh_px = to_px(s_lm[12])
@@ -65,36 +63,24 @@ class DepthManager:
             r_sh_px, r_el_px, r_wr_px, metric_to_px_scale, shoulder_z=w_lm_eff[12].z
         )
         
+        # FIX: Calculate delta and move fingers
+        r_wrist_dz = r_wr_geom_z - mp_r_wrist_z
         w_lm_eff[14] = _LM(w_lm_eff[14], z=r_el_geom_z)
         w_lm_eff[16] = _LM(w_lm_eff[16], z=r_wr_geom_z)
+        for idx in [18, 20, 22]:
+            w_lm_eff[idx] = _LM(w_lm_eff[idx], z=w_lm_eff[idx].z + r_wrist_dz)
 
-        # ─── UPDATED: STATS COLLECTION (Every 2 Seconds) ───
+        # ─── STATS COLLECTION ───
         current_time = time.time()
-        stats_payload = None  # Default to None if interval hasn't passed
+        stats_payload = None 
         
         if current_time - self.last_stats_time >= self.STATS_INTERVAL_SEC:
             stats_payload = {
                 "timestamp_ms": int(current_time * 1000),
-                "left_elbow":  {
-                    "mediapipe_z": float(mp_l_elbow_z), 
-                    "anatomical_z": float(l_el_geom_z), 
-                    "delta": float(l_el_geom_z - mp_l_elbow_z)
-                },
-                "left_wrist":  {
-                    "mediapipe_z": float(mp_l_wrist_z), 
-                    "anatomical_z": float(l_wr_geom_z), 
-                    "delta": float(l_wr_geom_z - mp_l_wrist_z)
-                },
-                "right_elbow": {
-                    "mediapipe_z": float(mp_r_elbow_z), 
-                    "anatomical_z": float(r_el_geom_z), 
-                    "delta": float(r_el_geom_z - mp_r_elbow_z)
-                },
-                "right_wrist": {
-                    "mediapipe_z": float(mp_r_wrist_z), 
-                    "anatomical_z": float(r_wr_geom_z), 
-                    "delta": float(r_wr_geom_z - mp_r_wrist_z)
-                }
+                "left_elbow":  {"mediapipe_z": float(mp_l_elbow_z), "anatomical_z": float(l_el_geom_z), "delta": float(l_el_geom_z - mp_l_elbow_z)},
+                "left_wrist":  {"mediapipe_z": float(mp_l_wrist_z), "anatomical_z": float(l_wr_geom_z), "delta": float(l_wr_geom_z - mp_l_wrist_z)},
+                "right_elbow": {"mediapipe_z": float(mp_r_elbow_z), "anatomical_z": float(r_el_geom_z), "delta": float(r_el_geom_z - mp_r_elbow_z)},
+                "right_wrist": {"mediapipe_z": float(mp_r_wrist_z), "anatomical_z": float(r_wr_geom_z), "delta": float(r_wr_geom_z - mp_r_wrist_z)}
             }
             self.last_stats_time = current_time
         
@@ -104,10 +90,6 @@ class DepthManager:
         return w_lm_eff, stats_payload
 
     def _apply_drumming_posture_boost(self, s_lm, w_lm_eff):
-        """
-        Applies a slight forward Z-boost when hands are detected in the active drumming 
-        'strike zone' (stomach height, inside torso width).
-        """
         wl, wr = w_lm_eff[15], w_lm_eff[16]
 
         y_sh_avg = (w_lm_eff[11].y + w_lm_eff[12].y) / 2.0
@@ -132,8 +114,8 @@ class DepthManager:
             l_in_torso and r_in_torso
         )
 
-        _BOOST_RISE = 0.25   # ~4 frames to fully activate
-        _BOOST_FALL = 0.05   # ~20 frames to fully decay
+        _BOOST_RISE = 0.25   
+        _BOOST_FALL = 0.05   
 
         if condition_met:
             self.depth_boost_weight = min(1.0, self.depth_boost_weight + _BOOST_RISE)
@@ -144,5 +126,9 @@ class DepthManager:
             effective_boost = -0.08 * self.depth_boost_weight
             w_lm_eff[15] = _LM(wl, z=wl.z + effective_boost)
             w_lm_eff[16] = _LM(wr, z=wr.z + effective_boost)
+            
+            # FIX: Apply posture boost to fingers too!
+            for idx in [17, 19, 21, 18, 20, 22]:
+                w_lm_eff[idx] = _LM(w_lm_eff[idx], z=w_lm_eff[idx].z + effective_boost)
 
         return w_lm_eff
