@@ -201,7 +201,7 @@ class UIRenderer:
 
         rq = []
 
-        # Ground grid (Forced to the absolute bottom layer)
+        # Ground grid
         XS = [-1.1, -0.7, -0.28, 0, 0.28, 0.7, 1.1]
         ZS = [-0.15, -0.35, -0.55, -0.75, -0.95, -1.15]
         GRID_Y = 0.65
@@ -213,7 +213,7 @@ class UIRenderer:
             p1 = project(XS[0], GRID_Y, gz);  p2 = project(XS[-1], GRID_Y, gz)
             rq.append({"t":"line", "depth": -100, "p1":p1[:2], "p2":p2[:2], "color":(30,42,58), "w":1})
 
-        # Drums (Sorted by physical World Z coordinate!)
+        # Drums (Sorted by projected camera depth Z-Rot)
         for name, props in kit.drums.items():
             cx, cy, cz = props["center"]
             is_hit = (
@@ -222,6 +222,8 @@ class UIRenderer:
                 cur_time - kit.last_hit_time["RF"].get(name, 0) < 0.20
             )
             col = (0, 240, 60) if is_hit else props["color_idle"]
+            
+            # Use z_rot for depth sorting instead of flat cz
             ppx, ppy, z_rot, dist = project(cx, cy, cz)
             rx_m, ry_m, rz_m = props["radii"]
 
@@ -230,17 +232,17 @@ class UIRenderer:
                 rx    = max(int((rx_m * SCALE) / dist), 4)
                 ry    = max(int((rx_m * cos_p * SCALE) / dist), 4)
                 thick = max(int((visual_thickness_m * SCALE) / dist), 2)
-                rq.append({"t":"bass_drum", "depth": cz, "name":"BD",
+                rq.append({"t":"bass_drum", "depth": z_rot, "name":"BD",
                            "px":ppx, "py":ppy, "rx":rx, "ry":ry, "thick":thick, "col":col})
             else:
                 visual_thickness_m = 0.02 if "Cymbal" in name or "Hi-Hat" in name else 0.12
                 rx    = max(int((rx_m * SCALE) / dist), 4)
                 ry    = max(int((ry_m * SCALE) / dist), 2)
                 thick = max(int((visual_thickness_m * SCALE) / dist), 2)
-                rq.append({"t":"drum", "depth": cz, "name":name[:3].upper(),
+                rq.append({"t":"drum", "depth": z_rot, "name":name[:3].upper(),
                            "px":ppx, "py":ppy, "rx":rx, "ry":ry, "thick":thick, "col":col})
 
-        # Arms (Restored proper Z-Rot perspective sorting + Kalman smoothing)
+        # Arms (Restored natural rigid skeleton)
         if w_lm_eff and fixed_sw_m > 0:
             arm_defs = [
                 (w_lm_eff[11], w_lm_eff[13], w_lm_eff[15], w_lm_eff[19], dbg_l, (100, 220, 255)),
@@ -251,27 +253,13 @@ class UIRenderer:
                     continue
                 sh3 = (sh_w.x, sh_w.y, sh_w.z)
                 el3 = (el_w.x, el_w.y, el_w.z)
-                
-                # ---> THE KALMAN VISUAL FIX <---
-                raw_wr3 = (wr_w.x, wr_w.y, wr_w.z)
-                raw_fi3 = (fi_w.x, fi_w.y, fi_w.z)
-                
-                if dbg and "norm_3d" in dbg:
-                    # 1. Grab the buttery-smooth Kalman wrist coordinates
-                    wr3 = dbg["norm_3d"]
-                    
-                    # 2. Shift the fingers by the exact same smoothed delta so the hand doesn't shatter
-                    dx, dy, dz = wr3[0] - raw_wr3[0], wr3[1] - raw_wr3[1], wr3[2] - raw_wr3[2]
-                    fi3 = (raw_fi3[0] + dx, raw_fi3[1] + dy, raw_fi3[2] + dz)
-                else:
-                    wr3 = raw_wr3
-                    fi3 = raw_fi3
-                # -------------------------------
+                wr3 = (wr_w.x, wr_w.y, wr_w.z)
+                fi3 = (fi_w.x, fi_w.y, fi_w.z)
                 
                 sh_p, el_p, wr_p = project(*sh3), project(*el3), project(*wr3)
                 line_w = max(2, int(8 / el_p[3]))
                 
-                # Reverted depth tags back to proper projection (e.g. sh_p[2]) to fix the 3D perspective!
+                # Sorted cleanly using the camera's Z projection
                 rq.append({"t":"line", "depth": (sh_p[2]+el_p[2])/2, "p1":sh_p[:2], "p2":el_p[:2], "color":arm_col, "w":line_w})
                 rq.append({"t":"line", "depth": (el_p[2]+wr_p[2])/2, "p1":el_p[:2], "p2":wr_p[:2], "color":arm_col, "w":line_w})
                 
