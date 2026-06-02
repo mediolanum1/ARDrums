@@ -29,6 +29,7 @@ class AppState:
         self.show_coords = False
         self.freeze_drums = True
         self.show_flow = False
+        self.show_latency = False
         
         # Depth configuration
         self.depth_active = False 
@@ -195,9 +196,12 @@ class ARDrumApp:
                             self.kit, w_lm_eff, cur_time, dbg_l, dbg_r, dbg_foot, 
                             self.calibration.fixed_sw_m, render_state
                         )
-                    
+                    else:
+                        pov_canvas = None
+
                     controls_panel = self.ui.build_controls_panel(render_state)
-                    self.ui.draw_combined_view(image, pov_canvas, controls_panel)
+                    latency_text = self._format_latency_text() if self.state.show_latency else None
+                    self.ui.draw_combined_view(image, pov_canvas, controls_panel, latency_text)
             else:
                 # if no output from mediapipe output frame and empty UI 
                 self.ui.draw_combined_view(image, None, None)
@@ -221,6 +225,7 @@ class ARDrumApp:
             "depth_state": self.state.depth_active,
             "depth_status_msg": self.state.depth_status_msg,
             "rhythm_active": self.state.rhythm_active,
+            "show_latency": self.state.show_latency,
             
             # these will be updated dynamically in the main loop if hits occur
             "last_l_hit_time": getattr(self, "_last_l_hit", 0),
@@ -239,6 +244,7 @@ class ARDrumApp:
         elif key == ord("n"): self.state.show_drum_names = not self.state.show_drum_names
         elif key == ord("p"): self.state.show_pov = not self.state.show_pov
         elif key == ord("o"): self.state.show_flow = not self.state.show_flow
+        elif key == ord("l"): self.state.show_latency = not self.state.show_latency
         elif key == ord("s"): 
             self.state.stick_mode = not self.state.stick_mode
             
@@ -253,6 +259,13 @@ class ARDrumApp:
             self.stats.save_depth_comparison_json()
         self.kit.cleanup()
         cv2.destroyAllWindows()
+
+    def _format_latency_text(self):
+        latencies = self.kit.last_playback_latency_ms
+        left_ms = latencies.get("L", 0.0)
+        right_ms = latencies.get("R", 0.0)
+        kick_ms = latencies.get("RF", 0.0)
+        return f"L: {left_ms:0.2f} ms   R: {right_ms:0.2f} ms   K: {kick_ms:0.2f} ms"
 
 if __name__ == "__main__":
     app = ARDrumApp()

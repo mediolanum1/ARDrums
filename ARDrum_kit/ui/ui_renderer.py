@@ -16,7 +16,7 @@ class UIRenderer:
         cv2.namedWindow(self.win_name, cv2.WINDOW_NORMAL | cv2.WINDOW_KEEPRATIO)
         cv2.setWindowProperty(self.win_name, cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
 
-    def draw_combined_view(self, cam_img, pov_canvas, controls_panel, rhythm_overlay_text=None):
+    def draw_combined_view(self, cam_img, pov_canvas, controls_panel, overlay_text=None):
         """Assembles the 3 panels into the final window."""
         cam_w = int(self.frame_width * (self.app_h / self.frame_height))
         total_w = cam_w + self.right_w
@@ -25,9 +25,13 @@ class UIRenderer:
 
         # 1. Main Camera View (Left side)
         cam = cv2.resize(cam_img, (cam_w, self.app_h))
-        if rhythm_overlay_text:
-            cv2.putText(cam, rhythm_overlay_text, (12, self.app_h - 16),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 230, 200), 2)
+        if overlay_text:
+            text_size = cv2.getTextSize(overlay_text, cv2.FONT_HERSHEY_SIMPLEX, 0.75, 2)[0]
+            box_tl = (10, self.app_h - 32)
+            box_br = (12 + text_size[0] + 12, self.app_h - 8)
+            cv2.rectangle(cam, box_tl, box_br, (10, 10, 10), -1)
+            cv2.putText(cam, overlay_text, (16, self.app_h - 14),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.75, (0, 230, 200), 2)
         combined[:, :cam_w] = cam
         cv2.line(combined, (cam_w, 0), (cam_w, self.app_h), (40, 40, 40), 2)
 
@@ -91,6 +95,7 @@ class UIRenderer:
             ("[O]",   "Flow debug",     state_dict.get("show_flow", False)),
             ("[Q]",   state_dict.get("depth_label", "Depth"), state_dict.get("depth_state", None)),
             ("[R]",   "Rhythm test",    state_dict.get("rhythm_active", False)),
+            ("[L]",   "Latency overlay", state_dict.get("show_latency", False)),
             ("[ESC]", "Quit",           None),
         ]
 

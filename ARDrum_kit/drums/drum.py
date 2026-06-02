@@ -1,5 +1,6 @@
 import math
 import os
+import time
 import pygame
 
 class VirtualDrumKit:
@@ -15,6 +16,7 @@ class VirtualDrumKit:
         
         # Track hit times per limb (Left, Right, Right Foot)
         self.last_hit_time = {"L": {}, "R": {}, "RF": {}}
+        self.last_playback_latency_ms = {"L": 0.0, "R": 0.0, "RF": 0.0}
       
         # Velocity thresholds based on 'smooth_norm_speed'
         self.MIN_SPEED = 0.015  # Softest hit
@@ -83,6 +85,9 @@ class VirtualDrumKit:
             self.last_hit_time["L"][drum_name] = 0.0
             self.last_hit_time["R"][drum_name] = 0.0
             self.last_hit_time["RF"][drum_name] = 0.0
+            self.last_playback_latency_ms["L"] = 0.0
+            self.last_playback_latency_ms["R"] = 0.0
+            self.last_playback_latency_ms["RF"] = 0.0
             
             # Normal Samples
             if os.path.exists(props["sound_path"]):
@@ -160,7 +165,9 @@ class VirtualDrumKit:
         if drum_name in target_dict:
             sound = target_dict[drum_name]
             sound.set_volume(volume)
+            start = time.perf_counter()
             sound.play()
+            self.last_playback_latency_ms[hand_id] = (time.perf_counter() - start) * 1000.0
 
         return drum_name
 
@@ -232,7 +239,9 @@ class VirtualDrumKit:
                 if drum_name in target_dict:
                     sound = target_dict[drum_name]
                     sound.set_volume(volume)
+                    start = time.perf_counter()
                     sound.play()
+                    self.last_playback_latency_ms[hand_id] = (time.perf_counter() - start) * 1000.0
                     
                 return drum_name
 
