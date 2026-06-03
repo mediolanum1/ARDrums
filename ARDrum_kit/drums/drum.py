@@ -72,7 +72,7 @@ class VirtualDrumKit:
     def _init_audio(self):
         """Initializes Pygame mixer and loads all audio layers into memory."""
         try:
-            pygame.mixer.pre_init(frequency=44100, size=-16, channels=2, buffer=512)
+            pygame.mixer.pre_init(frequency=44100, size=-16, channels=2, buffer=256)
             pygame.init()
             pygame.mixer.set_num_channels(64)
         except Exception as e:

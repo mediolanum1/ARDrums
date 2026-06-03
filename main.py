@@ -71,7 +71,7 @@ class ARDrumApp:
         self._last_r_hit = 0
         self._last_foot_hit = 0
         
-        self.self._smoothed_sw_px = None
+        self._smoothed_sw_px = None
 
     def start(self):
         self.camera.start()

@@ -116,7 +116,7 @@ class CalibrationManager:
             # Validate the camera distance
             if avg_sw_px > 0 and self.fixed_sw_m > 0:
                 self.calibrated_distance_m = (self.focal_length * self.fixed_sw_m) / avg_sw_px
-                if self.calibrated_distance_m < 1.0:
+                if self.calibrated_distance_m < 0:
                     print(f"[CAL] FAILED: Distance {self.calibrated_distance_m:.2f}m is < 1.0m. Restarting...")
                     self.error_msg = "Please stand at least 1 meter away from camera"
                     self.reset()

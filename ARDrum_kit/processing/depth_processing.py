@@ -48,7 +48,7 @@ class DepthManager:
         mp_l_wrist_z = w_lm_eff[15].z
         
         l_el_geom_z, l_wr_geom_z = anatomical_estimator.estimate_chain_z_fusion(
-            l_sh_px, l_el_px, l_wr_px, metric_to_px_scale, elbow_z=mp_l_elbow_z, wrist_z=mp_l_wrist_z, shoulder_z=w_lm_eff[11].z
+            l_sh_px, l_el_px, l_wr_px, metric_to_px_scale, mp_elbow_z=mp_l_elbow_z, mp_wrist_z=mp_l_wrist_z, mp_shoulder_z=w_lm_eff[11].z
         )
         
         # this is fingers , idk maybe later delete cuz we dont use them
@@ -66,7 +66,7 @@ class DepthManager:
         mp_r_wrist_z = w_lm_eff[16].z
         
         r_el_geom_z, r_wr_geom_z = anatomical_estimator.estimate_chain_z_fusion(
-            r_sh_px, r_el_px, r_wr_px, metric_to_px_scale, elbow_z=mp_r_elbow_z, wrist_z=mp_r_wrist_z, shoulder_z=w_lm_eff[12].z
+            r_sh_px, r_el_px, r_wr_px, metric_to_px_scale, mp_elbow_z=mp_r_elbow_z, mp_wrist_z=mp_r_wrist_z, mp_shoulder_z=w_lm_eff[12].z
         )
         # fingers same as above
         r_wrist_dz = r_wr_geom_z - mp_r_wrist_z
