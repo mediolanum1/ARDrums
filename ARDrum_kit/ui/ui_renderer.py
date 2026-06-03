@@ -147,7 +147,7 @@ class UIRenderer:
 
         return panel
 
-    def draw_2d_overlays(self, image, dbg_l, dbg_r, dbg_foot, show_coords=False):
+    def draw_2d_overlays(self, image, dbg_l, dbg_r, dbg_foot,dbg_l_foot,show_coords=False):
         for dbg, color in [(dbg_l, (255, 0, 0)), (dbg_r, (0, 0, 255))]:
             if dbg:
                 px = dbg["pos_px"]
@@ -167,7 +167,17 @@ class UIRenderer:
             if is_hit:
                 cv2.putText(image, "KICK", (px[0] - 20, px[1] - 28),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 200, 255), 2)
-
+        if dbg_l_foot:
+            px = dbg_l_foot["pos_px"]
+            is_hit = bool(dbg_l_foot.get("hit"))
+            is_pressing = dbg_l_foot.get("state") == "DOWN"
+            ring_col = (0, 130, 255) if is_pressing else (80, 60, 30)
+            cv2.circle(image, px, 20, ring_col, 2)
+            dot_col = (0, 200, 255) if is_hit else (180, 100, 30)
+            cv2.circle(image, px, 10, dot_col, -1)
+            if is_hit:
+                cv2.putText(image, "KICK", (px[0] - 20, px[1] - 28),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 200, 255), 2)
     def draw_drums_2d(self, image, kit, cur_time, show_drum_names=True):
         if not kit.pixel_positions:
             return
@@ -198,7 +208,7 @@ class UIRenderer:
                 cv2.putText(image, label, (tx, ty), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 0), 4)
                 cv2.putText(image, label, (tx, ty), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
 
-    def render_pov_canvas(self, kit, w_lm_eff, cur_time, dbg_l, dbg_r, dbg_foot, fixed_sw_m, state_dict):
+    def render_pov_canvas(self, kit, w_lm_eff, cur_time, dbg_l, dbg_r, dbg_foot,dbg_l_foot, fixed_sw_m, state_dict):
         """Builds the 3D projected perspective."""
         _POV_REN_W = 800
         _POV_REN_H = 640
@@ -241,7 +251,8 @@ class UIRenderer:
             is_hit = (
                 cur_time - kit.last_hit_time["L"].get(name, 0) < 0.20 or
                 cur_time - kit.last_hit_time["R"].get(name, 0) < 0.20 or
-                cur_time - kit.last_hit_time["RF"].get(name, 0) < 0.20
+                cur_time - kit.last_hit_time["RF"].get(name, 0) < 0.20 or
+                cur_time - kit.last_hit_time["LF"].get(name, 0) < 0.20
             )
             col = (0, 240, 60) if is_hit else props["color_idle"]
             
@@ -255,6 +266,7 @@ class UIRenderer:
                 thick = max(int((visual_thickness_m * SCALE) / dist), 2)
                 rq.append({"t":"bass_drum", "depth": z_rot, "name":"BD",
                            "px":ppx, "py":ppy, "rx":rx, "ry":ry, "thick":thick, "col":col})
+            
             else:
                 visual_thickness_m = 0.02 if "Cymbal" in name or "Hi-Hat" in name else 0.12
                 rx    = max(int((rx_m * SCALE) / dist), 4)

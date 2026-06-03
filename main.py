@@ -59,6 +59,7 @@ class ARDrumApp:
         self.left_arm = GestureWristProcessor("L")
         self.right_arm = GestureWristProcessor("R")
         self.foot = GestureFootProcessor("RF")
+        self.l_foot = GestureFootProcessor("LF")
         
         self.tip_tracker_l = ColorTipTracker(color="orange", stick_length_m=0.406, focal_length=self.focal_length, frame_w=self.camera.frame_width, frame_h=self.camera.frame_height)
         self.tip_tracker_r = ColorTipTracker(color="pink", stick_length_m=0.406, focal_length=self.focal_length, frame_w=self.camera.frame_width, frame_h=self.camera.frame_height)
@@ -72,6 +73,7 @@ class ARDrumApp:
         self._last_l_hit = 0
         self._last_r_hit = 0
         self._last_foot_hit = 0
+        self._last_l_foot_hit = 0
         
         self._smoothed_sw_px = None
 
@@ -136,8 +138,11 @@ class ARDrumApp:
                         ankle_pos = None
                         if s_lm[27].visibility > 0.3:
                             ankle_pos = (s_lm[27].x * self.dims[0], s_lm[27].y * self.dims[1])
+                        l_ankle_pos = None
+                        if s_lm[28].visibility > 0.3:
+                            l_ankle_pos = (s_lm[28].x * self.dims[0], s_lm[28].y * self.dims[1])
 
-                        self.kit.update_layout(torso_cx, torso_cy, self.calibration.metric_to_px_scale, ankle_pos)
+                        self.kit.update_layout(torso_cx, torso_cy, self.calibration.metric_to_px_scale, ankle_pos,l_ankle_pos)
                  
                     # getting depth estimation from anatomic estimator 
                     w_lm_eff, stats_payload = self.depth_manager.process_kinematic_depth(
@@ -171,11 +176,15 @@ class ARDrumApp:
                         s_lm[27], w_lm_eff[27], s_lm[23], s_lm[24], 
                         self.kit, cur_time_ms, self.dims, mediapipe_present=(s_lm[27].visibility > 0.3)
                     )
-                    
+                    hit_l_foot, dbg_l_foot = self.l_foot.process(
+                        s_lm[28], w_lm_eff[28], s_lm[23], s_lm[24], 
+                        self.kit, cur_time_ms, self.dims, mediapipe_present=(s_lm[28].visibility > 0.3)
+                    )
                     # updating render state 
                     render_state["dbg_l"] = dbg_l
                     render_state["dbg_r"] = dbg_r
                     render_state["dbg_foot"] = dbg_foot
+                    render_state["dbg_l_foot"] = dbg_l_foot
                     if hit_l: 
                         self._last_l_hit = cur_time
                         render_state["last_l_hit_time"] = cur_time
@@ -185,17 +194,19 @@ class ARDrumApp:
                     if hit_foot: 
                         self._last_foot_hit = cur_time
                         render_state["last_foot_hit_time"] = cur_time
-
+                    if hit_l_foot: 
+                        self._last_foot_hit = cur_time
+                        render_state["last_l_foot_hit_time"] = cur_time
                     if self.state.show_drums:
                         self.ui.draw_drums_2d(image, self.kit, cur_time, self.state.show_drum_names)
                     # draw hand points on UI
-                    self.ui.draw_2d_overlays(image, dbg_l, dbg_r, dbg_foot, self.state.show_coords)
+                    self.ui.draw_2d_overlays(image, dbg_l, dbg_r, dbg_foot,dbg_l_foot,self.state.show_coords)
                 
                     # drawing UI canvases and passing to comined view to render
                     pov_canvas = None
                     if self.state.show_pov:
                         pov_canvas = self.ui.render_pov_canvas(
-                            self.kit, w_lm_eff, cur_time, dbg_l, dbg_r, dbg_foot, 
+                            self.kit, w_lm_eff, cur_time, dbg_l, dbg_r, dbg_foot,dbg_l_foot,
                             self.calibration.fixed_sw_m, render_state
                         )
                     else:
@@ -273,7 +284,8 @@ class ARDrumApp:
         left_ms = latencies.get("L", 0.0)
         right_ms = latencies.get("R", 0.0)
         kick_ms = latencies.get("RF", 0.0)
-        return f"L: {left_ms:0.2f} ms   R: {right_ms:0.2f} ms   K: {kick_ms:0.2f} ms"
+        L_foot_ms = latencies.get("LF", 0.0)
+        return f"L: {left_ms:0.2f} ms   R: {right_ms:0.2f} ms   RF: {kick_ms:0.2f} ms   LF: {L_foot_ms:0.2f} ms"
 
 if __name__ == "__main__":
     app = ARDrumApp()

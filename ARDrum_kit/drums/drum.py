@@ -15,8 +15,8 @@ class VirtualDrumKit:
         self.pixel_positions  = {}
         
         # Track hit times per limb (Left, Right, Right Foot)
-        self.last_hit_time = {"L": {}, "R": {}, "RF": {}}
-        self.last_playback_latency_ms = {"L": 0.0, "R": 0.0, "RF": 0.0}
+        self.last_hit_time = {"L": {}, "R": {}, "RF": {}, "LF":{}}
+        self.last_playback_latency_ms = {"L": 0.0, "R": 0.0, "RF": 0.0, "LF": 0.0}
       
         # Velocity thresholds based on 'smooth_norm_speed'
         self.MIN_SPEED = 0.015  # Softest hit
@@ -66,6 +66,11 @@ class VirtualDrumKit:
                 "sound_path": f"{base_dir}/sounds/kick.mp3", 
                 "sound_path_quiet": f"{base_dir}/sounds/kick_quiet.mp3"
             },
+            "Hi-hat Control": {
+                "center": ( -0.30,  0, -0.25), "radii": (0.22, 0.22, 0.10), "color_idle": (220,  90,  30), 
+                "sound_path": f"{base_dir}/sounds/kick.mp3", 
+                "sound_path_quiet": f"{base_dir}/sounds/kick_quiet.mp3"
+            },
         }
 
         self.enabled_drums = set(self.drums.keys())
@@ -88,10 +93,11 @@ class VirtualDrumKit:
             self.last_hit_time["L"][drum_name] = 0.0
             self.last_hit_time["R"][drum_name] = 0.0
             self.last_hit_time["RF"][drum_name] = 0.0
+            self.last_hit_time["LF"][drum_name] = 0.0
             self.last_playback_latency_ms["L"] = 0.0
             self.last_playback_latency_ms["R"] = 0.0
             self.last_playback_latency_ms["RF"] = 0.0
-            
+            self.last_playback_latency_ms["LF"] = 0.0
             # Normal Samples
             if os.path.exists(props["sound_path"]):
                 self.loaded_sounds[drum_name] = pygame.mixer.Sound(props["sound_path"])
@@ -128,6 +134,16 @@ class VirtualDrumKit:
                         "ry": int(ry_m * scale * 0.45),
                     }
                 continue
+            if name == "Hi-hat Control":
+                if l_ankle_pos is not None:
+                    rx_m, ry_m, _ = props["radii"]
+                    positions[name] = {
+                        "cx": int(l_ankle_pos[0]),
+                        "cy": int(l_ankle_pos[1]),
+                        "rx": int(rx_m * scale * 0.9),
+                        "ry": int(ry_m * scale * 0.45),
+                    }
+                continue
             
             cx_m, cy_m, _ = props["center"]
             rx_m, ry_m, _ = props["radii"]
@@ -156,7 +172,10 @@ class VirtualDrumKit:
 
     def trigger_bass_drum(self, cur_time: float, smooth_norm_speed: float, hand_id: str = "RF") -> str | None:
         """Called directly by the Foot Processor to trigger the kick."""
-        drum_name = "Bass Drum"
+        drum_name = ""
+        if hand_id == "RF":
+            drum_name = "Bass Drum"
+        else: drum_name ="Hi-hat Control"
         if not self.is_drum_enabled(drum_name):
             return None
 
