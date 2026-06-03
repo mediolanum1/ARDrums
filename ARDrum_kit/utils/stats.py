@@ -4,42 +4,26 @@ import time
 
 class StatsManager:
     def __init__(self, filename="results/depth_comparison_analysis.json"):
-        """
-        Collects raw timeseries data of depth comparisons and generates 
-        summary reports when the application closes.
-        """
         self.filename = filename
         self.depth_comparison_stats = []
 
     def add_depth_stats(self, stats_payload):
-        """
-        Called every frame by the main loop. Appends a dictionary containing 
-        the MediaPipe vs Kinematic depth delta for elbows and wrists.
-        """
         self.depth_comparison_stats.append(stats_payload)
 
     def save_depth_comparison_json(self):
-        """
-        Compiles overall run metrics and dumps tracking history to JSON.
-        Usually called during the app cleanup sequence.
-        """
         if not self.depth_comparison_stats:
             print("[STATS] No comparison data gathered during this session (List is empty).")
             return
 
-        # Ensure directory structure exists
         os.makedirs(os.path.dirname(self.filename), exist_ok=True)
 
-        # Extract delta arrays for statistical summary
         l_wrist_deltas = [entry["left_wrist"]["delta"] for entry in self.depth_comparison_stats]
         r_wrist_deltas = [entry["right_wrist"]["delta"] for entry in self.depth_comparison_stats]
         l_elbow_deltas = [entry["left_elbow"]["delta"] for entry in self.depth_comparison_stats]
         r_elbow_deltas = [entry["right_elbow"]["delta"] for entry in self.depth_comparison_stats]
 
-        # Prevent ZeroDivisionError if list is somehow empty despite the check above
         num_frames = len(self.depth_comparison_stats)
         
-        # Calculate duration safely
         start_time = self.depth_comparison_stats[0].get("timestamp_ms", 0)
         end_time = self.depth_comparison_stats[-1].get("timestamp_ms", 0)
         session_duration_sec = (end_time - start_time) / 1000.0

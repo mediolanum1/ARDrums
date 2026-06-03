@@ -32,7 +32,7 @@ class AppState:
         self.show_latency = False
         self.enabled_drums = set()
         
-        # Depth configuration
+        # depth configuration
         self.depth_active = False 
         self.depth_label = "Kinematic Depth Mode"
         self.depth_status_msg = "Running Kinematic IK"
