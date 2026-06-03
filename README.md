@@ -12,8 +12,17 @@
 
 ### About
 
+<!--
+Source - https://stackoverflow.com/a/12118349
+Posted by waldyr.ar, modified by community. See post 'Timeline' for change history
+Retrieved 2026-06-03, License - CC BY-SA 4.0
+-->
+<p align="center">
 <img width="400" height="225" alt="example" src="https://github.com/user-attachments/assets/3d4c2529-eade-4972-992e-55fbee38a193" />
+
 <img width="400" height="225" alt="example" src="https://github.com/user-attachments/assets/3d4c2529-eade-4972-992e-55fbee38a193" />
+
+</p>
 
 
 Play a virtual 3D drum set using only a webcam and PC! This project uses the Mediapipe Pose Model along with anatomy-based 2D to 3D Pose Estimation to track your arms in real-time, allowing you to play a virtual drum set without any special hardware.
