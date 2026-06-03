@@ -1,4 +1,4 @@
-# ARDrums
+# 🥁 ARDrums: Real-Time Virtual Drumming
 
 <br>
 
