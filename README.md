@@ -102,3 +102,4 @@ Since this project uses Computer Vision, **your environment and your location in
 
 ### License
 
+[![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](LICENSE)
