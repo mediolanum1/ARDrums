@@ -56,13 +56,13 @@ class CalibrationManager:
             (l_sh_w.z - r_sh_w.z) ** 2
         )
 
-        # 2. Screen shoulder width (pixels)
+       
         cur_sw_px = math.hypot(
             (l_sh_s.x - r_sh_s.x) * self.frame_width,
             (l_sh_s.y - r_sh_s.y) * self.frame_height,
         )
 
-        # 3. Kinematic pixel lengths (Average Left and Right to remove bias)
+        
         l_sh_px = (s_lm[11].x * self.frame_width, s_lm[11].y * self.frame_height)
         l_el_px = (s_lm[13].x * self.frame_width, s_lm[13].y * self.frame_height)
         l_wr_px = (s_lm[15].x * self.frame_width, s_lm[15].y * self.frame_height)
@@ -87,25 +87,25 @@ class CalibrationManager:
         self._sw_px_list.append(cur_sw_px)
         print(f"[CAL] Frame {len(self._sw_m_list)}/{self.target_frames} captured.")
 
-        # 5. Check if we have enough frames to finalize
+        
         if len(self._sw_m_list) >= self.target_frames:
             self.fixed_sw_m = sum(self._sw_m_list) / self.target_frames
             avg_sw_px       = sum(self._sw_px_list) / self.target_frames
             avg_upper_px    = sum(self._p_upper_px_list) / self.target_frames
             avg_forearm_px  = sum(self._p_forearm_px_list) / self.target_frames
             
-            # Establish the baseline scale
+            
             self.metric_to_px_scale = avg_sw_px / self.fixed_sw_m if self.fixed_sw_m > 0 else 1.0
 
-            # Convert to meters and send to the depth estimator
+            
             avg_upper_arm_m = avg_upper_px / self.metric_to_px_scale
             avg_forearm_m = avg_forearm_px / self.metric_to_px_scale
             depth_estimator.calibrate_exact_lengths(avg_upper_arm_m, avg_forearm_m)
 
-            # Validate the camera distance
+         
             if avg_sw_px > 0 and self.fixed_sw_m > 0:
                 self.calibrated_distance_m = (self.focal_length * self.fixed_sw_m) / avg_sw_px
-                if self.calibrated_distance_m < 0:
+                if self.calibrated_distance_m < 1.0:
                     print(f"[CAL] FAILED: Distance {self.calibrated_distance_m:.2f}m is < 1.0m. Restarting...")
                     self.error_msg = "Please stand at least 1 meter away from camera"
                     self.reset()
