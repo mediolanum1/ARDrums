@@ -2,7 +2,7 @@ import math
 import time
 
 class CalibrationManager:
-    def __init__(self, frame_width, frame_height, focal_length, target_frames=5):
+    def __init__(self, frame_width, frame_height, focal_length, target_frames=10):
         """
         Manages the T-pose calibration phase, calculating the pixel-to-metric scale,
         estimating user distance, and configuring the anatomical depth estimator.

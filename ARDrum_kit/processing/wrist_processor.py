@@ -43,10 +43,10 @@ class GestureWristProcessor:
         # measurement_noise: raise if MediaPipe is noisy on your camera
         self._kf = WristKalman(
             dt=1 / 30,
-           # process_noise=1e-2,
-            process_noise=1e-1,
-              # measurement_noise=1e-1,
-            measurement_noise=5e-2,
+            process_noise=1e-2,
+           # process_noise=1e-1,
+            measurement_noise=1e-1,
+           # measurement_noise=5e-2,
         )
         self._mediapipe_missing_frames = 0
         self._MAX_MISSING_FRAMES = 6

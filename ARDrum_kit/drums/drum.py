@@ -57,7 +57,7 @@ class VirtualDrumKit:
                 "sound_path_quiet": f"{base_dir}/sounds/ride_cymbal_quiet.mp3"
             },
             "Crash Cymbal": {
-                "center": (-0.30, -0.60, -0.33), "radii": (0.20, 0.07, 0.1), "color_idle": (0,   215, 255), 
+                "center": (-0.30, -0.60, -0.37), "radii": (0.20, 0.07, 0.1), "color_idle": (0,   215, 255), 
                 "sound_path": f"{base_dir}/sounds/high_crash_cymbal.mp3", 
                 "sound_path_quiet": f"{base_dir}/sounds/high_crash_cymbal_quiet.mp3"
             },

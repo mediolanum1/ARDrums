@@ -47,7 +47,7 @@ class DepthManager:
         mp_l_elbow_z = w_lm_eff[13].z
         mp_l_wrist_z = w_lm_eff[15].z
         
-        l_el_geom_z, l_wr_geom_z = anatomical_estimator.estimate_chain_z_fusion(
+        l_el_geom_z, l_wr_geom_z = anatomical_estimator.estimate_chain_z(
             l_sh_px, l_el_px, l_wr_px, metric_to_px_scale, mp_elbow_z=mp_l_elbow_z, mp_wrist_z=mp_l_wrist_z, mp_shoulder_z=w_lm_eff[11].z
         )
         
@@ -65,7 +65,7 @@ class DepthManager:
         mp_r_elbow_z = w_lm_eff[14].z
         mp_r_wrist_z = w_lm_eff[16].z
         
-        r_el_geom_z, r_wr_geom_z = anatomical_estimator.estimate_chain_z_fusion(
+        r_el_geom_z, r_wr_geom_z = anatomical_estimator.estimate_chain_z(
             r_sh_px, r_el_px, r_wr_px, metric_to_px_scale, mp_elbow_z=mp_r_elbow_z, mp_wrist_z=mp_r_wrist_z, mp_shoulder_z=w_lm_eff[12].z
         )
         # fingers same as above
@@ -89,7 +89,7 @@ class DepthManager:
             self.last_stats_time = current_time
 
 
-        w_lm_eff = self._apply_drumming_posture_boost(s_lm, w_lm_eff)
+#       w_lm_eff = self._apply_drumming_posture_boost(s_lm, w_lm_eff)
 
         return w_lm_eff, stats_payload
 
