@@ -2,11 +2,8 @@ import cv2
 import numpy as np
 import math
 
-# --- UPDATED IMPORT ---
 from ARDrum_kit.processing.kalman_wrist import WristKalman
 
-# Tune these HSV ranges per your tip color.
-# Run the helper at bottom to find your values.
 TIP_PROFILES = {
     "red":    ([0,  120, 100], [10, 255, 255],   # lower red hue
                [160, 120, 100], [180, 255, 255]), # upper red hue (wraps)
@@ -17,15 +14,7 @@ TIP_PROFILES = {
 }
 
 class ColorTipTracker:
-    """
-    Detects a colored drumstick tip in the frame, then computes the
-    full 3-D position of the tip using:
-      - wrist world-space coords from MediaPipe  (anchor point)
-      - tip 2-D screen coords from color blob    (ray direction)
-      - known stick length                       (depth constraint)
 
-    Also runs a Kalman filter on the tip 3-D output to smooth jitter.
-    """
 
     def __init__(self,
                  color: str,
@@ -50,10 +39,9 @@ class ColorTipTracker:
         self.min_blob_area = min_blob_area
         self.max_blob_area = max_blob_area
 
-        # Kalman on the 3-D tip position
+       
         self._kf = WristKalman(process_noise=8e-3, measurement_noise=6e-2)
 
-        # Last known tip pixel (for drawing even when lost briefly)
         self.last_tip_px = None
         self._lost_frames = 0
         self._MAX_LOST = 6   # extrapolate for up to N frames then give up

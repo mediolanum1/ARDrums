@@ -47,8 +47,8 @@ class PoseTracker:
 
     def get_latest_result(self):
         try:
-            #return self.result_queue.get(timeout=0.1)
-            return self.result_queue.get_nowait()
+            return self.result_queue.get(timeout=0.1)
+            #return self.result_queue.get_nowait()
         except queue.Empty:
             return None
 

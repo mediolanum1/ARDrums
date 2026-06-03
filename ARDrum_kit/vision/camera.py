@@ -30,8 +30,8 @@ class CameraManager:
 
     def get_latest_frame(self):
         try: 
-            #return self.frame_queue.get(timeout=0.1)
-            return self.frame_queue.get_nowait()
+            return self.frame_queue.get(timeout=0.1)
+           # return self.frame_queue.get_nowait()
         except queue.Empty: 
             return None
         

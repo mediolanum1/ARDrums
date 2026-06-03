@@ -1,14 +1,9 @@
 import math
 from typing import Optional
-
-# Ensure this imports correctly based on your new folder structure
 from ARDrum_kit.processing.kalman_wrist import WristKalman
 
-# ─── Gesture State Constants ───
 UP = 0
 DOWN = 1
-
-# ─── Tuning Thresholds ───
 SPEED_THRESHOLD              = 0.015
 COOLDOWN_MS                  = 100
 STATE_CHANGE_FRAME_THRESHOLD = 1
@@ -21,12 +16,7 @@ STALL_SPEED_THRESHOLD        = 0.008
 
 class GestureWristProcessor:
     def __init__(self, label):
-        """
-        Processes raw wrist landmarks, applies Kalman filtering, and manages 
-        the UP/DOWN striking state machine to detect drum hits.
-        
-        :param label: "L" for Left Arm, "R" for Right Arm.
-        """
+
         self.label = label
         self.state = UP
         self.state_change_frame = 0
@@ -95,11 +85,9 @@ class GestureWristProcessor:
         horizontal_motion = abs(norm_dx)
         upward_motion     = norm_dy
 
-        # ── State machine ─────────────────────────────────────────────────
         hit_detected = None
 
         if self.state == UP:
-            # Transition to DOWN state if moving fast enough downwards or sideways
             if raw_norm_speed > SPEED_THRESHOLD and (
                 downward_motion > MIN_DOWNWARD_MOTION or
                 horizontal_motion > MIN_HORIZONTAL_MOTION
@@ -122,7 +110,6 @@ class GestureWristProcessor:
                 (curr_3d_coords[2] - sh_wrl.z) ** 2
             )
 
-            # Check if all physical strike conditions are met
             if (self.smooth_norm_speed > SPEED_THRESHOLD and
                     self.prev_3d_coords is not None and
                     downward_motion > 0 and
@@ -130,7 +117,6 @@ class GestureWristProcessor:
                     sw_dist > self.MIN_ARM_EXTENSION_M and
                     (cur_time_ms - self.last_hit_time) > COOLDOWN_MS):
         
-                # ── Rhythm-stats hook: 2D trigger ──────────────────────────────
                 if rhythm_session is not None:
                     rhythm_session.on_2d_trigger(
                         wrist_px    = wrist_px,
@@ -138,7 +124,6 @@ class GestureWristProcessor:
                         time_ms     = cur_time_ms,
                     )
         
-                # Calculate intersection with the 3D drum kit bounding boxes
                 hit_detected = kit.check_line_intersection(
                     self.prev_3d_coords,
                     curr_3d_coords,
@@ -149,7 +134,6 @@ class GestureWristProcessor:
                     self.label,
                 )
         
-                # ── Rhythm-stats hook: 3D result ───────────────────────────────
                 if rhythm_session is not None:
                     rhythm_session.on_3d_result(
                         drum_name   = hit_detected,
@@ -161,7 +145,6 @@ class GestureWristProcessor:
                 self.last_hit_time = cur_time_ms
                 self.state = UP
 
-            # Check for return to UP state
             if upward_motion < MIN_UPWARD_MOTION:
                 self.state_change_frame += 1
                 if self.state_change_frame > STATE_CHANGE_FRAME_THRESHOLD:
@@ -175,7 +158,6 @@ class GestureWristProcessor:
             else:
                 self.state_change_frame = 0
 
-        # ── Update per-frame memory ───────────────────────────────────────
         self.prev_wrist_px  = wrist_px
         self.prev_3d_coords = curr_3d_coords
 
@@ -192,7 +174,6 @@ class GestureWristProcessor:
         return hit_detected, debug_info
 
     def _empty_debug(self, wrist_px):
-        """Returns a blank debug dictionary for frames where tracking is lost."""
         return {
             "pos_px":      (int(wrist_px[0]), int(wrist_px[1])),
             "sh_px":       (0, 0),

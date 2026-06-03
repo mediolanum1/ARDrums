@@ -5,22 +5,19 @@ import pygame
 
 class VirtualDrumKit:
     def __init__(self, base_dir="ARDrum_kit/drums"):
-        """
-        Manages the 3D layout, 2D pixel projections, and dual-layered audio 
-        playback for the AR Drum Kit.
-        """
+
         self.hit_cooldown     = 0.25
         self.use_sticks       = False
         self.active_stick_ext = (0.0, 0.0, 0.0)
         self.pixel_positions  = {}
         
-        # Track hit times per limb (Left, Right, Right Foot)
+        
         self.last_hit_time = {"L": {}, "R": {}, "RF": {}, "LF":{}}
         self.last_playback_latency_ms = {"L": 0.0, "R": 0.0, "RF": 0.0, "LF": 0.0}
       
-        # Velocity thresholds based on 'smooth_norm_speed'
-        self.MIN_SPEED = 0.015  # Softest hit
-        self.MAX_SPEED = 0.2   # Hardest hit
+      
+        self.MIN_SPEED = 0.015  
+        self.MAX_SPEED = 0.2   
         
         try:
             pygame.mixer.pre_init(...)
@@ -77,8 +74,7 @@ class VirtualDrumKit:
         self.drum_order = list(self.drums.keys())
         self._init_audio()
 
-    def _init_audio(self):
-        """Initializes Pygame mixer and loads all audio layers into memory."""
+    def _init_audio(self):    
         try:
             pygame.mixer.pre_init(frequency=44100, size=-16, channels=2, buffer=256)
             pygame.init()
@@ -98,7 +94,7 @@ class VirtualDrumKit:
             self.last_playback_latency_ms["R"] = 0.0
             self.last_playback_latency_ms["RF"] = 0.0
             self.last_playback_latency_ms["LF"] = 0.0
-            # Normal Samples
+          
             if os.path.exists(props["sound_path"]):
                 self.loaded_sounds[drum_name] = pygame.mixer.Sound(props["sound_path"])
             else:
@@ -110,17 +106,8 @@ class VirtualDrumKit:
             else:
                 print(f"[AUDIO] WARNING: Missing quiet audio -> {props['sound_path_quiet']}")
 
-    # ─── Dynamic Layout Updater (NEW) ──────────────────────────────────────────
+  
     def update_layout(self, torso_cx, torso_cy, scale, ankle_pos=None,l_ankle_pos=None):
-        """
-        Calculates the 2D pixel coordinates for all drums based on the user's 
-        current body position on screen.
-        
-        :param torso_cx: Center X of the user's hips (pixels)
-        :param torso_cy: Center Y of the user's hips (pixels)
-        :param scale: The metric_to_px_scale from calibration
-        :param ankle_pos: Tuple (x, y) for the bass drum anchor, if visible.
-        """
         positions = {}
         
         for name, props in self.drums.items():
@@ -157,9 +144,8 @@ class VirtualDrumKit:
 
         self.pixel_positions = positions
 
-    # ─── Velocity & Triggers ──────────────────────────────────────────────────
     def get_hit_parameters(self, smooth_norm_speed: float) -> tuple[bool, float]:
-        """Evaluates speed and returns: (use_quiet_sample, volume)"""
+      
         raw_velocity = (smooth_norm_speed - self.MIN_SPEED) / (self.MAX_SPEED - self.MIN_SPEED)
         clamped_velocity = max(0.0, min(1.0, raw_velocity))
         
@@ -171,7 +157,6 @@ class VirtualDrumKit:
             return False, 1.0
 
     def trigger_bass_drum(self, cur_time: float, smooth_norm_speed: float, hand_id: str = "RF") -> str | None:
-        """Called directly by the Foot Processor to trigger the kick."""
         drum_name = ""
         if hand_id == "RF":
             drum_name = "Bass Drum"
@@ -196,7 +181,6 @@ class VirtualDrumKit:
 
         return drum_name
 
-    # ─── Math & Collisions ────────────────────────────────────────────────────
     @staticmethod
     def _segment_hits_ellipse(px0, py0, px1, py1, cx, cy, rx, ry):
         dx = px1 - px0; dy = py1 - py0
@@ -221,7 +205,7 @@ class VirtualDrumKit:
 
     def check_line_intersection(self, p_prev, p_curr, cur_time, smooth_norm_speed,
                                  px_prev, px_curr, hand_id="R"):
-        """Called by the Wrist Processors to see if the gesture intersected a drum."""
+
         x0, y0, z0 = p_prev
         x1, y1, z1 = p_curr
 

@@ -3,16 +3,13 @@ import time
 
 class CalibrationManager:
     def __init__(self, frame_width, frame_height, focal_length, target_frames=10):
-        """
-        Manages the T-pose calibration phase, calculating the pixel-to-metric scale,
-        estimating user distance, and configuring the anatomical depth estimator.
-        """
+
         self.frame_width = frame_width
         self.frame_height = frame_height
         self.focal_length = focal_length
         self.target_frames = target_frames
 
-        # State Variables
+     
         self.is_calibrated = False
         self.fixed_sw_m = 1.0
         self.metric_to_px_scale = 1.0
@@ -22,14 +19,13 @@ class CalibrationManager:
         self.start_time = time.time()
         self.COUNTDOWN_SECONDS = 5
 
-        # Data Buffers
+        # buffer
         self._sw_m_list = []
         self._sw_px_list = []
         self._p_upper_px_list = []
         self._p_forearm_px_list = []
 
     def reset(self):
-        """Clears buffers and resets the countdown timer. Used when calibration fails."""
         self.is_calibrated = False
         self.start_time = time.time()
         
@@ -39,16 +35,10 @@ class CalibrationManager:
         self._p_forearm_px_list.clear()
 
     def update(self, s_lm, w_lm, depth_estimator):
-        """
-        Called every frame. Handles the countdown, takes measurements if the 
-        countdown is finished, and applies them to the depth_estimator.
-        
-        :returns: True if calibration is complete, False otherwise.
-        """
+    
         if self.is_calibrated:
             return True
 
-        # Wait for the countdown to finish before sampling frames
         elapsed = time.time() - self.start_time
         if elapsed < self.COUNTDOWN_SECONDS:
             return False 
@@ -56,11 +46,10 @@ class CalibrationManager:
         l_sh_w, r_sh_w = w_lm[11], w_lm[12]
         l_sh_s, r_sh_s = s_lm[11], s_lm[12]
         
-        # If shoulders aren't clearly visible, skip this frame
         if l_sh_s.visibility <= 0.5 or r_sh_s.visibility <= 0.5:
             return False
 
-        # 1. World shoulder width (meters)
+      
         cur_sw_m = math.sqrt(
             (l_sh_w.x - r_sh_w.x) ** 2 +
             (l_sh_w.y - r_sh_w.y) ** 2 +
