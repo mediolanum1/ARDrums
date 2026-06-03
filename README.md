@@ -19,9 +19,7 @@ Retrieved 2026-06-03, License - CC BY-SA 4.0
 -->
 <p align="center">
 <img width="400" height="225" alt="example" src="https://github.com/user-attachments/assets/3d4c2529-eade-4972-992e-55fbee38a193" />
-
-<img width="400" height="225" alt="example" src="https://github.com/user-attachments/assets/3d4c2529-eade-4972-992e-55fbee38a193" />
-
+<img width="400" height="225" alt="example_2" src="https://github.com/user-attachments/assets/5d74b379-f652-4db4-a86b-26484fbc008b" />
 </p>
 
 
