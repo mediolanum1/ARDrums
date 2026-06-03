@@ -71,6 +71,8 @@ class ARDrumApp:
         self._last_r_hit = 0
         self._last_foot_hit = 0
         
+        self.self._smoothed_sw_px = None
+
     def start(self):
         self.camera.start()
         self.pose_tracker.start()
@@ -109,17 +111,14 @@ class ARDrumApp:
 
                 # main running code aftrer calibration
                 else:
-                    # 1. Grab the raw distance between shoulders
                     raw_sw_px = max(1.0, math.hypot((s_lm[11].x - s_lm[12].x) * self.dims[0], (s_lm[11].y - s_lm[12].y) * self.dims[1]))
-                    
-                    # 2. Smooth it using an Exponential Moving Average (EMA)
-                    # 80% old smooth value, 20% new raw values
-                    if not hasattr(self, '_smoothed_sw_px'):
+     
+                    if self._smoothed_sw_px is None:
                         self._smoothed_sw_px = raw_sw_px
                     else:
+                       # self._smoothed_sw_px = (self._smoothed_sw_px * 0.8) + (raw_sw_px * 0.2)
                         self._smoothed_sw_px = (self._smoothed_sw_px * 0.85) + (raw_sw_px * 0.15)
 
-                    # 3. Use the SMOOTHED value for all distance and scale math
                     render_state["dist_m"] = self.calibration.get_current_distance(self._smoothed_sw_px)
                     self.calibration.metric_to_px_scale = (
                         self._smoothed_sw_px / self.calibration.fixed_sw_m if self.calibration.fixed_sw_m > 0 else 1.0
@@ -130,7 +129,7 @@ class ARDrumApp:
                         torso_cx = int(((s_lm[23].x + s_lm[24].x) / 2) * self.dims[0])
                         torso_cy = int(((s_lm[23].y + s_lm[24].y) / 2) * self.dims[1])
                         
-                        # Only check ankle visibility if we are actually updating the layout
+                        # only check ankle visibility if we are actually updating the layout
                         ankle_pos = None
                         if s_lm[27].visibility > 0.3:
                             ankle_pos = (s_lm[27].x * self.dims[0], s_lm[27].y * self.dims[1])

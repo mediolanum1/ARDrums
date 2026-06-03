@@ -20,7 +20,7 @@ class VirtualDrumKit:
       
         # Velocity thresholds based on 'smooth_norm_speed'
         self.MIN_SPEED = 0.015  # Softest hit
-        self.MAX_SPEED = 0.15   # Hardest hit
+        self.MAX_SPEED = 0.2   # Hardest hit
         
         try:
             pygame.mixer.pre_init(...)

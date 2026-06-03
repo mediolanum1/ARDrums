@@ -12,18 +12,16 @@ class UIRenderer:
         self.pov_h = 540
         self.win_name = "AR Drum Kit"
 
-        # --- FULL SCREEN CONFIGURATION ---
         cv2.namedWindow(self.win_name, cv2.WINDOW_NORMAL | cv2.WINDOW_KEEPRATIO)
         cv2.setWindowProperty(self.win_name, cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
 
     def draw_combined_view(self, cam_img, pov_canvas, controls_panel, overlay_text=None):
-        """Assembles the 3 panels into the final window."""
+  
         cam_w = int(self.frame_width * (self.app_h / self.frame_height))
         total_w = cam_w + self.right_w
         
         combined = np.zeros((self.app_h, total_w, 3), dtype=np.uint8)
 
-        # 1. Main Camera View (Left side)
         cam = cv2.resize(cam_img, (cam_w, self.app_h))
         if overlay_text:
             text_size = cv2.getTextSize(overlay_text, cv2.FONT_HERSHEY_SIMPLEX, 0.75, 2)[0]
@@ -35,7 +33,6 @@ class UIRenderer:
         combined[:, :cam_w] = cam
         cv2.line(combined, (cam_w, 0), (cam_w, self.app_h), (40, 40, 40), 2)
 
-        # 2. POV Window (Top Right)
         if pov_canvas is not None:
             pov_resized = cv2.resize(pov_canvas, (self.right_w, self.pov_h))
         else:
@@ -47,7 +44,6 @@ class UIRenderer:
         combined[:self.pov_h, cam_w:] = pov_resized
         cv2.line(combined, (cam_w, self.pov_h), (total_w, self.pov_h), (40, 40, 40), 2)
 
-        # 3. Controls Panel (Bottom Right)
         if controls_panel is not None:
             ctrl_h = self.app_h - self.pov_h
             ctrl_resized = cv2.resize(controls_panel, (self.right_w, ctrl_h))
@@ -56,7 +52,6 @@ class UIRenderer:
         cv2.imshow(self.win_name, combined)
 
     def build_controls_panel(self, state_dict):
-        """Builds the 2D controls panel using a dictionary of state variables."""
         w = self.right_w
         h = self.app_h - self.pov_h
         
@@ -69,7 +64,6 @@ class UIRenderer:
         cv2.rectangle(panel, (0, 0), (w, 32), (24, 28, 42), -1)
         cv2.putText(panel, "CONTROLS", (14, 22), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 210, 210), 1)
 
-        # Distance logic
         dist_m = state_dict.get("dist_m")
         if dist_m is not None:
             dist_txt = f"Distance: {dist_m:.2f} m"
@@ -84,7 +78,7 @@ class UIRenderer:
         cv2.putText(panel, dist_txt, ((w - ts[0]) // 2, 54),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.55, dist_col, 1)
 
-        # Build Keyboard mappings dynamically from state
+        # build Keyboard mappings dynamically from state
         keys = [
             ("[D]",   "Toggle drums",   state_dict.get("show_drums", True)),
             ("[N]",   "Drum names",     state_dict.get("show_drum_names", True)),
@@ -116,7 +110,7 @@ class UIRenderer:
                 lbl = "ON" if state else "off"
                 cv2.putText(panel, lbl, (dot_x - 26, y), cv2.FONT_HERSHEY_SIMPLEX, 0.38, dot_col, 1)
 
-        # Hit detection overlays
+        # hit detection overlays
         base_y = h - 18
         col_hit = (0, 255, 120)
         if dbg_l and (cur_time - state_dict.get("last_l_hit_time", 0)) < 0.4:
@@ -134,7 +128,6 @@ class UIRenderer:
         return panel
 
     def draw_2d_overlays(self, image, dbg_l, dbg_r, dbg_foot, show_coords=False):
-        """Restores the 2D tracking circles on the webcam feed."""
         for dbg, color in [(dbg_l, (255, 0, 0)), (dbg_r, (0, 0, 255))]:
             if dbg:
                 px = dbg["pos_px"]
@@ -156,7 +149,6 @@ class UIRenderer:
                             cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 200, 255), 2)
 
     def draw_drums_2d(self, image, kit, cur_time, show_drum_names=True):
-        """Draws the 2D drum ellipses directly onto the webcam feed."""
         if not kit.pixel_positions:
             return
             
@@ -205,8 +197,6 @@ class UIRenderer:
             return px, py, z_rot, dist
 
         rq = []
-
-        # Ground grid
         XS = [-1.1, -0.7, -0.28, 0, 0.28, 0.7, 1.1]
         ZS = [-0.15, -0.35, -0.55, -0.75, -0.95, -1.15]
         GRID_Y = 0.65
@@ -218,7 +208,6 @@ class UIRenderer:
             p1 = project(XS[0], GRID_Y, gz);  p2 = project(XS[-1], GRID_Y, gz)
             rq.append({"t":"line", "depth": -100, "p1":p1[:2], "p2":p2[:2], "color":(30,42,58), "w":1})
 
-        # Drums (Sorted by projected camera depth Z-Rot)
         for name, props in kit.drums.items():
             cx, cy, cz = props["center"]
             is_hit = (
@@ -228,7 +217,6 @@ class UIRenderer:
             )
             col = (0, 240, 60) if is_hit else props["color_idle"]
             
-            # Use z_rot for depth sorting instead of flat cz
             ppx, ppy, z_rot, dist = project(cx, cy, cz)
             rx_m, ry_m, rz_m = props["radii"]
 
@@ -247,7 +235,6 @@ class UIRenderer:
                 rq.append({"t":"drum", "depth": z_rot, "name":name[:3].upper(),
                            "px":ppx, "py":ppy, "rx":rx, "ry":ry, "thick":thick, "col":col})
 
-        # Arms (Restored natural rigid skeleton)
         if w_lm_eff and fixed_sw_m > 0:
             arm_defs = [
                 (w_lm_eff[11], w_lm_eff[13], w_lm_eff[15], w_lm_eff[19], dbg_l, (100, 220, 255)),
@@ -264,7 +251,7 @@ class UIRenderer:
                 sh_p, el_p, wr_p = project(*sh3), project(*el3), project(*wr3)
                 line_w = max(2, int(8 / el_p[3]))
                 
-                # Sorted cleanly using the camera's Z projection
+                # rorted cleanly using the camera's Z projection
                 rq.append({"t":"line", "depth": (sh_p[2]+el_p[2])/2, "p1":sh_p[:2], "p2":el_p[:2], "color":arm_col, "w":line_w})
                 rq.append({"t":"line", "depth": (el_p[2]+wr_p[2])/2, "p1":el_p[:2], "p2":wr_p[:2], "color":arm_col, "w":line_w})
                 
@@ -273,7 +260,7 @@ class UIRenderer:
                 rq.append({"t":"dot", "depth": sh_p[2], "px":sh_p[0], "py":sh_p[1], "col":arm_col, "r":rad_sh})
                 rq.append({"t":"dot", "depth": el_p[2], "px":el_p[0], "py":el_p[1], "col":arm_col, "r":rad_el})
 
-                # Virtual Drumsticks
+                # virtual Drumsticks 
                 fw_x = fi3[0]-wr3[0]; fw_y = fi3[1]-wr3[1]; fw_z = fi3[2]-wr3[2]
                 fw_mag = math.sqrt(fw_x**2 + fw_y**2 + fw_z**2)
                 if state_dict.get("stick_mode") and fw_mag > 1e-3:
@@ -294,7 +281,7 @@ class UIRenderer:
                 rq.append({"t":"hand", "depth": wr_p[2], "px":wr_p[0], "py":wr_p[1],
                            "col":wrist_col, "state":dbg.get("state","") if dbg else "", "r":rad_wr})
 
-        # Render Queue processing
+        # render Queue processing
         rq.sort(key=lambda i: i["depth"])
         for item in rq:
             t = item["t"]

@@ -1,9 +1,8 @@
 import time
 
 class _LM:
-    """Lightweight read/write landmark proxy to override MediaPipe's read-only tuples."""
+   # wrapper for MP outputs cuz they are read-only
     __slots__ = ("x", "y", "z", "visibility", "presence")
-
     def __init__(self, lm, z=None):
         self.x          = lm.x
         self.y          = lm.y
@@ -11,13 +10,9 @@ class _LM:
         self.visibility = getattr(lm, "visibility", 1.0)
         self.presence   = getattr(lm, "presence", 1.0)
 
-        
 class DepthManager:
     def __init__(self, frame_width, frame_height):
-        """
-        Manages overriding MediaPipe's native depth with Kinematic Anatomical Depth,
-        and applies posture-based heuristics.
-        """
+
         self.frame_width = frame_width
         self.frame_height = frame_height
         self.depth_boost_weight = 0.0
@@ -41,7 +36,7 @@ class DepthManager:
             self._smoothed_l_sh_z = raw_l_z
             self._smoothed_r_sh_z = raw_r_z
         else:
-            # 80% history, 20% new input
+
             self._smoothed_l_sh_z = (self._smoothed_l_sh_z * 0.8) + (raw_l_z * 0.2)
             self._smoothed_r_sh_z = (self._smoothed_r_sh_z * 0.8) + (raw_r_z * 0.2)
     
@@ -52,19 +47,17 @@ class DepthManager:
         mp_l_elbow_z = w_lm_eff[13].z
         mp_l_wrist_z = w_lm_eff[15].z
         
-        l_el_geom_z, l_wr_geom_z = anatomical_estimator.estimate_chain_z(
-            l_sh_px, l_el_px, l_wr_px, metric_to_px_scale,
-            mp_elbow_z=mp_l_elbow_z, mp_wrist_z=mp_l_wrist_z, shoulder_z=w_lm_eff[11].z
+        l_el_geom_z, l_wr_geom_z = anatomical_estimator.estimate_chain_z_fusion(
+            l_sh_px, l_el_px, l_wr_px, metric_to_px_scale, elbow_z=mp_l_elbow_z, wrist_z=mp_l_wrist_z, shoulder_z=w_lm_eff[11].z
         )
         
-        # FIX: Calculate delta and move fingers
+        # this is fingers , idk maybe later delete cuz we dont use them
         l_wrist_dz = l_wr_geom_z - mp_l_wrist_z
         w_lm_eff[13] = _LM(w_lm_eff[13], z=l_el_geom_z)
         w_lm_eff[15] = _LM(w_lm_eff[15], z=l_wr_geom_z)
         for idx in [17, 19, 21]:
             w_lm_eff[idx] = _LM(w_lm_eff[idx], z=w_lm_eff[idx].z + l_wrist_dz)
 
-        # --- RIGHT ARM ---
         r_sh_px = to_px(s_lm[12])
         r_el_px = to_px(s_lm[14])
         r_wr_px = to_px(s_lm[16])
@@ -72,19 +65,16 @@ class DepthManager:
         mp_r_elbow_z = w_lm_eff[14].z
         mp_r_wrist_z = w_lm_eff[16].z
         
-        r_el_geom_z, r_wr_geom_z = anatomical_estimator.estimate_chain_z(
-            r_sh_px, r_el_px, r_wr_px, metric_to_px_scale,
-            mp_elbow_z=mp_r_elbow_z, mp_wrist_z=mp_r_wrist_z, shoulder_z=w_lm_eff[12].z
+        r_el_geom_z, r_wr_geom_z = anatomical_estimator.estimate_chain_z_fusion(
+            r_sh_px, r_el_px, r_wr_px, metric_to_px_scale, elbow_z=mp_r_elbow_z, wrist_z=mp_r_wrist_z, shoulder_z=w_lm_eff[12].z
         )
-        
-        # FIX: Calculate delta and move fingers
+        # fingers same as above
         r_wrist_dz = r_wr_geom_z - mp_r_wrist_z
         w_lm_eff[14] = _LM(w_lm_eff[14], z=r_el_geom_z)
         w_lm_eff[16] = _LM(w_lm_eff[16], z=r_wr_geom_z)
         for idx in [18, 20, 22]:
             w_lm_eff[idx] = _LM(w_lm_eff[idx], z=w_lm_eff[idx].z + r_wrist_dz)
 
-        # ─── STATS COLLECTION ───
         current_time = time.time()
         stats_payload = None 
         
@@ -97,8 +87,8 @@ class DepthManager:
                 "right_wrist": {"mediapipe_z": float(mp_r_wrist_z), "anatomical_z": float(r_wr_geom_z), "delta": float(r_wr_geom_z - mp_r_wrist_z)}
             }
             self.last_stats_time = current_time
-        
-        # --- APPLY POSTURAL BOOST ---
+
+
         w_lm_eff = self._apply_drumming_posture_boost(s_lm, w_lm_eff)
 
         return w_lm_eff, stats_payload
@@ -141,7 +131,7 @@ class DepthManager:
             w_lm_eff[15] = _LM(wl, z=wl.z + effective_boost)
             w_lm_eff[16] = _LM(wr, z=wr.z + effective_boost)
             
-            # FIX: Apply posture boost to fingers too!
+        
             for idx in [17, 19, 21, 18, 20, 22]:
                 w_lm_eff[idx] = _LM(w_lm_eff[idx], z=w_lm_eff[idx].z + effective_boost)
 

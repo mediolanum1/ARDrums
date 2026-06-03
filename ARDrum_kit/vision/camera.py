@@ -17,18 +17,23 @@ class CameraManager:
     def _camera_thread(self):
         while self.running:
             success, image = self.cap.read()
-            if not success: continue
+            if not success: 
+                continue
             image = cv2.flip(image, 1)
             
-            # Keep queue fresh
-            try: self.frame_queue.get_nowait()
-            except queue.Empty: pass
+            try: 
+                self.frame_queue.get_nowait()
+            except queue.Empty: 
+                pass
             
             self.frame_queue.put(image)
 
     def get_latest_frame(self):
-        try: return self.frame_queue.get(timeout=0.1)
-        except queue.Empty: return None
+        try: 
+            #return self.frame_queue.get(timeout=0.1)
+            return self.frame_queue.get_nowait()
+        except queue.Empty: 
+            return None
         
     def stop(self):
         self.running = False

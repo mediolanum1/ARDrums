@@ -32,43 +32,32 @@ class GestureWristProcessor:
         self.state_change_frame = 0
         self.last_hit_time = 0
         
-        # Minimum physical distance from shoulder to wrist to register a hit (~28 cm)
         self.MIN_ARM_EXTENSION_M = 0.18  
-        self.WORLD_Y_STRIKE_THRESHOLD = 0.003  # ~8 mm downward in world metres
+        self.WORLD_Y_STRIKE_THRESHOLD = 0.005  # ~8 mm downward in world metres
         
         self.prev_wrist_px   = None
         self.prev_3d_coords  = None
         self.smooth_norm_speed = 0.0
 
-        # ── Kalman filter for 3-D wrist position ─────────────────────────
         # process_noise: raise if you swing fast and the filter lags behind
         # measurement_noise: raise if MediaPipe is noisy on your camera
         self._kf = WristKalman(
             dt=1 / 30,
-            process_noise=1e-2,
-            measurement_noise=1e-1,
+           # process_noise=1e-2,
+            process_noise=1e-1,
+              # measurement_noise=1e-1,
+            measurement_noise=5e-2,
         )
         self._mediapipe_missing_frames = 0
-        
-        # How many consecutive missing frames before we reset the filter.
-        # 6 frames (~0.2 s at 30 fps) is generous enough to survive fast
-        # swings while not letting a drifted prediction run forever.
         self._MAX_MISSING_FRAMES = 6
 
     def process(self, w_scr, w_wrl, sh_scr, sh_wrl, el_scr,
                 sw_m, kit, cur_time_ms, frame_dims, other_sh_scr,
                 mediapipe_present: bool = True,
                 rhythm_session=None):
-        """
-        Evaluates the current frame's kinematics and triggers hits on the kit.
-        
-        :param mediapipe_present: Pass False when MediaPipe returned no landmarks
-                                  for this side so the filter can extrapolate.
-        """
         w, h = frame_dims
         wrist_px = (w_scr.x * w, w_scr.y * h)
 
-        # Normalize speed against shoulder width to keep math consistent regardless of user distance
         current_sw_px = math.hypot(
             sh_scr.x - other_sh_scr.x,
             sh_scr.y - other_sh_scr.y,
@@ -76,24 +65,20 @@ class GestureWristProcessor:
         if current_sw_px == 0:
             current_sw_px = 1
 
-        # ── Kalman update / predict ───────────────────────────────────────
         if mediapipe_present:
             self._mediapipe_missing_frames = 0
             kx, ky, kz = self._kf.update(w_wrl.x, w_wrl.y, w_wrl.z)
         else:
             self._mediapipe_missing_frames += 1
             if self._mediapipe_missing_frames > self._MAX_MISSING_FRAMES:
-                # Signal has been gone too long — reset so we don't drift.
                 self._kf.reset()
                 self._mediapipe_missing_frames = 0
                 return None, self._empty_debug(wrist_px)
             
-            # Extrapolate: keep the filter running without a measurement.
             kx, ky, kz = self._kf.predict_only()
 
         curr_3d_coords = (kx, ky, kz)
 
-        # ── 2-D screen-space motion (state machine only) ──────────────────
         norm_dx = 0.0
         norm_dy = 0.0
         raw_norm_speed = 0.0

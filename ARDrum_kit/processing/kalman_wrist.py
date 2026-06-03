@@ -11,6 +11,8 @@ class WristKalman:
         F[0, 3] = dt
         F[1, 4] = dt
         F[2, 5] = dt
+        F[3, 0] = 0.5 * dt**2  # this is a constant accelartion, if feels weird delete it, before it was constant velocitys
+
         self._kf.transitionMatrix = F
         H = np.zeros((3, 6), dtype=np.float32)
         H[0, 0] = 1.0

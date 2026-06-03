@@ -1,0 +1,13 @@
+
+
+in depth_processing.py i now use depth_estimator_fusion func, which takes fusion of mediapipe depth and estimated
+    depth based on confidence  --> if on screen we see whole arm length --> estimation is preffered, otherwise - pipe
+
+
+in pose_tracker i changed get_latest_result to return item from queu with no timeout, idk it might add jitter maybe, 
+    so if feels off uncommment other line
+
+same as above but for camera thread. 
+
+in wrist_processors changed hyperparams for kalman, if it lags on screen - rasie pricess_noise or lower measurement_noise.
+    if its jittery when holding hand still do otherway around. Also I added constant accelaration factor to Klaman 
