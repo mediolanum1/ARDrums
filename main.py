@@ -30,6 +30,7 @@ class AppState:
         self.freeze_drums = True
         self.show_flow = False
         self.show_latency = False
+        self.enabled_drums = set()
         
         # Depth configuration
         self.depth_active = False 
@@ -65,6 +66,7 @@ class ARDrumApp:
         self.stats = StatsManager()
 
         self.kit = VirtualDrumKit()
+        self.state.enabled_drums = self.kit.enabled_drums
         self.ui = UIRenderer(self.camera.frame_width, self.camera.frame_height, self.focal_length)
 
         self._last_l_hit = 0
@@ -84,6 +86,7 @@ class ARDrumApp:
         while self.running:
             result_data = self.pose_tracker.get_latest_result()
             if not result_data:
+                self._handle_input()
                 continue
                 
             image, result, cur_time = result_data
@@ -168,7 +171,7 @@ class ARDrumApp:
                         s_lm[27], w_lm_eff[27], s_lm[23], s_lm[24], 
                         self.kit, cur_time_ms, self.dims, mediapipe_present=(s_lm[27].visibility > 0.3)
                     )
-
+                    
                     # updating render state 
                     render_state["dbg_l"] = dbg_l
                     render_state["dbg_r"] = dbg_r
@@ -225,6 +228,8 @@ class ARDrumApp:
             "depth_status_msg": self.state.depth_status_msg,
             "rhythm_active": self.state.rhythm_active,
             "show_latency": self.state.show_latency,
+            "enabled_drums": self.kit.enabled_drums,
+            "drum_order": self.kit.drum_order,
             
             # these will be updated dynamically in the main loop if hits occur
             "last_l_hit_time": getattr(self, "_last_l_hit", 0),
@@ -249,6 +254,10 @@ class ARDrumApp:
             
             if hasattr(self.kit, 'use_sticks'):
                 self.kit.use_sticks = self.state.stick_mode
+        elif key >= ord("1") and key < ord("1") + len(self.kit.drum_order):
+            index = key - ord("1")
+            drum_name = self.kit.drum_order[index]
+            self.kit.toggle_drum(drum_name)
 
     def cleanup(self):    
         print("[CLEANUP] Saving statistics and closing threads...")

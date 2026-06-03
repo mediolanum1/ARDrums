@@ -110,6 +110,26 @@ class UIRenderer:
                 lbl = "ON" if state else "off"
                 cv2.putText(panel, lbl, (dot_x - 26, y), cv2.FONT_HERSHEY_SIMPLEX, 0.38, dot_col, 1)
 
+        drum_names = state_dict.get("drum_order", [])
+        enabled_drums = state_dict.get("enabled_drums", set())
+        if drum_names:
+            x = 14
+            drum_y = DIST_BOX_BOTTOM + 12 + len(keys) * row_h + 8
+            cv2.putText(panel, "Drum selection (1-7):", (x, drum_y),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.48, (200, 200, 255), 1)
+            drum_y += 22
+            for idx, name in enumerate(drum_names):
+                label = f"[{idx + 1}] {name}"
+                cv2.putText(panel, label, (x, drum_y),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.42, (180, 180, 210), 1)
+                dot_color = (0, 220, 110) if name in enabled_drums else (90, 90, 110)
+                text_w = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.42, 1)[0][0]
+                cv2.circle(panel, (x + text_w + 14, drum_y - 6), 5, dot_color, -1)
+                x += 210
+                if x + 180 > w:
+                    x = 14
+                    drum_y += 26
+
         # hit detection overlays
         base_y = h - 18
         col_hit = (0, 255, 120)
@@ -154,6 +174,9 @@ class UIRenderer:
             
         overlay = image.copy()
         for name, pos in kit.pixel_positions.items():
+            if not kit.is_drum_enabled(name):
+                continue
+
             is_hit = (
                 cur_time - kit.last_hit_time["L"].get(name, 0) < 0.2 or
                 cur_time - kit.last_hit_time["R"].get(name, 0) < 0.2 or
@@ -167,6 +190,8 @@ class UIRenderer:
 
         if show_drum_names:
             for name, pos in kit.pixel_positions.items():
+                if not kit.is_drum_enabled(name):
+                    continue
                 label = name.upper()
                 ts = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.8, 2)[0]
                 tx, ty = pos["cx"] - ts[0] // 2, pos["cy"] + ts[1] // 2
@@ -209,6 +234,9 @@ class UIRenderer:
             rq.append({"t":"line", "depth": -100, "p1":p1[:2], "p2":p2[:2], "color":(30,42,58), "w":1})
 
         for name, props in kit.drums.items():
+            if not kit.is_drum_enabled(name):
+                continue
+
             cx, cy, cz = props["center"]
             is_hit = (
                 cur_time - kit.last_hit_time["L"].get(name, 0) < 0.20 or

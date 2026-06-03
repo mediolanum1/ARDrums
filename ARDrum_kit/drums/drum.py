@@ -50,6 +50,7 @@ class VirtualDrumKit:
                 "sound_path": f"{base_dir}/sounds/middle_tom.mp3", 
                 "sound_path_quiet": f"{base_dir}/sounds/middle_tom_quiet.mp3"
             },
+
             "Ride Cymbal": {
                 "center": ( 0.55, -0.40, -0.33), "radii": (0.20, 0.07, 0.12), "color_idle": (0,   215, 255), 
                 "sound_path": f"{base_dir}/sounds/ride_cymbal.mp3", 
@@ -67,6 +68,8 @@ class VirtualDrumKit:
             },
         }
 
+        self.enabled_drums = set(self.drums.keys())
+        self.drum_order = list(self.drums.keys())
         self._init_audio()
 
     def _init_audio(self):
@@ -102,7 +105,7 @@ class VirtualDrumKit:
                 print(f"[AUDIO] WARNING: Missing quiet audio -> {props['sound_path_quiet']}")
 
     # ─── Dynamic Layout Updater (NEW) ──────────────────────────────────────────
-    def update_layout(self, torso_cx, torso_cy, scale, ankle_pos=None):
+    def update_layout(self, torso_cx, torso_cy, scale, ankle_pos=None,l_ankle_pos=None):
         """
         Calculates the 2D pixel coordinates for all drums based on the user's 
         current body position on screen.
@@ -125,7 +128,7 @@ class VirtualDrumKit:
                         "ry": int(ry_m * scale * 0.45),
                     }
                 continue
-
+            
             cx_m, cy_m, _ = props["center"]
             rx_m, ry_m, _ = props["radii"]
             
@@ -154,6 +157,9 @@ class VirtualDrumKit:
     def trigger_bass_drum(self, cur_time: float, smooth_norm_speed: float, hand_id: str = "RF") -> str | None:
         """Called directly by the Foot Processor to trigger the kick."""
         drum_name = "Bass Drum"
+        if not self.is_drum_enabled(drum_name):
+            return None
+
         if cur_time - self.last_hit_time[hand_id].get(drum_name, 0.0) <= self.hit_cooldown:
             return None
 
@@ -209,6 +215,9 @@ class VirtualDrumKit:
             if drum_name == "Bass Drum":
                 continue
 
+            if not self.is_drum_enabled(drum_name):
+                continue
+
             if cur_time - self.last_hit_time[hand_id][drum_name] <= self.hit_cooldown:
                 continue
 
@@ -246,6 +255,21 @@ class VirtualDrumKit:
                 return drum_name
 
         return None
+
+    def is_drum_enabled(self, drum_name: str) -> bool:
+        return drum_name in self.enabled_drums
+
+    def set_drum_enabled(self, drum_name: str, enabled: bool):
+        if enabled:
+            self.enabled_drums.add(drum_name)
+        else:
+            self.enabled_drums.discard(drum_name)
+
+    def toggle_drum(self, drum_name: str):
+        if drum_name in self.enabled_drums:
+            self.enabled_drums.remove(drum_name)
+        else:
+            self.enabled_drums.add(drum_name)
 
     def cleanup(self):
         pygame.quit()
