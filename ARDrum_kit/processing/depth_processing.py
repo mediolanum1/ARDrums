@@ -36,9 +36,12 @@ class DepthManager:
             self._smoothed_l_sh_z = raw_l_z
             self._smoothed_r_sh_z = raw_r_z
         else:
-
-            self._smoothed_l_sh_z = (self._smoothed_l_sh_z * 0.8) + (raw_l_z * 0.2)
-            self._smoothed_r_sh_z = (self._smoothed_r_sh_z * 0.8) + (raw_r_z * 0.2)
+            self._smoothed_l_sh_z = raw_l_z
+            self._smoothed_r_sh_z = raw_r_z
+            
+            # dont know if we would need smoothing if we use kalman
+            #self._smoothed_l_sh_z = (self._smoothed_l_sh_z * 0.8) + (raw_l_z * 0.2)
+            #self._smoothed_r_sh_z = (self._smoothed_r_sh_z * 0.8) + (raw_r_z * 0.2)
     
         l_sh_px = to_px(s_lm[11])
         l_el_px = to_px(s_lm[13])
