@@ -35,7 +35,6 @@ class CalibrationManager:
         self._p_forearm_px_list.clear()
 
     def update(self, s_lm, w_lm, depth_estimator):
-    
         if self.is_calibrated:
             return True
 
@@ -49,19 +48,16 @@ class CalibrationManager:
         if l_sh_s.visibility <= 0.5 or r_sh_s.visibility <= 0.5:
             return False
 
-      
         cur_sw_m = math.sqrt(
             (l_sh_w.x - r_sh_w.x) ** 2 +
             (l_sh_w.y - r_sh_w.y) ** 2 +
             (l_sh_w.z - r_sh_w.z) ** 2
         )
-
-       
+     
         cur_sw_px = math.hypot(
             (l_sh_s.x - r_sh_s.x) * self.frame_width,
             (l_sh_s.y - r_sh_s.y) * self.frame_height,
         )
-
         
         l_sh_px = (s_lm[11].x * self.frame_width, s_lm[11].y * self.frame_height)
         l_el_px = (s_lm[13].x * self.frame_width, s_lm[13].y * self.frame_height)
@@ -80,24 +76,20 @@ class CalibrationManager:
         p_upper_px   = (l_upper_px + r_upper_px) / 2.0
         p_forearm_px = (l_forearm_px + r_forearm_px) / 2.0
 
-        # 4. Store them
         self._p_upper_px_list.append(p_upper_px)
         self._p_forearm_px_list.append(p_forearm_px)
         self._sw_m_list.append(cur_sw_m)
         self._sw_px_list.append(cur_sw_px)
         print(f"[CAL] Frame {len(self._sw_m_list)}/{self.target_frames} captured.")
-
         
         if len(self._sw_m_list) >= self.target_frames:
             self.fixed_sw_m = sum(self._sw_m_list) / self.target_frames
             avg_sw_px       = sum(self._sw_px_list) / self.target_frames
             avg_upper_px    = sum(self._p_upper_px_list) / self.target_frames
             avg_forearm_px  = sum(self._p_forearm_px_list) / self.target_frames
-            
-            
+                      
             self.metric_to_px_scale = avg_sw_px / self.fixed_sw_m if self.fixed_sw_m > 0 else 1.0
 
-            
             avg_upper_arm_m = avg_upper_px / self.metric_to_px_scale
             avg_forearm_m = avg_forearm_px / self.metric_to_px_scale
             depth_estimator.calibrate_exact_lengths(avg_upper_arm_m, avg_forearm_m)
@@ -118,7 +110,6 @@ class CalibrationManager:
         return self.is_calibrated
 
     def get_ui_text(self):
-        """Returns tuples of text to render on the screen during the calibration phase."""
         if self.is_calibrated:
             return None, None
             
@@ -130,7 +121,6 @@ class CalibrationManager:
             return "STAY STILL", self.error_msg
 
     def get_current_distance(self, current_sw_px):
-        """Estimate live distance to user (metres) using pinhole camera model."""
         if not self.is_calibrated or current_sw_px <= 0 or self.fixed_sw_m <= 0:
             return None
         return (self.focal_length * self.fixed_sw_m) / current_sw_px

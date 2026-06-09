@@ -88,7 +88,7 @@ class DepthManager:
             }
             self.last_stats_time = current_time
 
-
+# idk if we need boosting when we use anatomical so im just keep it commented
 #       w_lm_eff = self._apply_drumming_posture_boost(s_lm, w_lm_eff)
 
         return w_lm_eff, stats_payload

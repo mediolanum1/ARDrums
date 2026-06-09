@@ -82,40 +82,27 @@ class ColorTipTracker:
         cx  = M["m10"] / M["m00"]
         cy  = M["m01"] / M["m00"]
         
-        # Optional: Print statement removed to avoid console spam during live play
-        # print("[DEBUG] found a tip!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
-        
         return (cx, cy), mask
 
-    # ── 3-D tip reconstruction ────────────────────────────────────────────
     def _solve_tip_3d(self, tip_px, wrist_world):
-        """
-        Intersects the camera ray through tip_px with a sphere of
-        radius=stick_length centered at wrist_world.
-        """
         wx, wy, wz = wrist_world
-
-        # Unit ray direction through the tip pixel
         rx = (tip_px[0] - self.cx) / self.focal_length
         ry = (tip_px[1] - self.cy) / self.focal_length
         rz = 1.0
         mag = math.sqrt(rx*rx + ry*ry + rz*rz)
         rx /= mag; ry /= mag; rz /= mag
 
-        # Quadratic  d² - 2d(r·W) + |W|² - L² = 0
         rW = rx*wx + ry*wy + rz*wz
         discriminant = rW*rW - (wx*wx + wy*wy + wz*wz) + self.stick_length**2
 
         if discriminant < 0:
-            # Numerically no solution — clamp (float errors on fringe cases)
+    
             discriminant = 0.0
 
         sqrt_disc = math.sqrt(discriminant)
         d1 = rW + sqrt_disc
         d2 = rW - sqrt_disc
 
-        # Pick the positive root; if both positive take the one
-        # whose z-component is closest to wrist depth (avoids far intersection)
         candidates = [d for d in (d1, d2) if d > 0.01]
         if not candidates:
             return None
@@ -124,7 +111,6 @@ class ColorTipTracker:
 
         return (d*rx, d*ry, d*rz)
 
-    # ── Main update ───────────────────────────────────────────────────────
     def update(self, bgr_frame, wrist_world):
         tip_px, dbg_mask = self._detect_tip_px(bgr_frame)
 
@@ -146,7 +132,6 @@ class ColorTipTracker:
 
         return None, None, dbg_mask
 
-    # ── Debug drawing ─────────────────────────────────────────────────────
     def draw_debug(self, image, tip_px, tip_3d, color_bgr=(0, 255, 200)):
         if tip_px is None:
             return
@@ -160,8 +145,6 @@ class ColorTipTracker:
                         cv2.FONT_HERSHEY_SIMPLEX, 0.45, color_bgr, 1)
 
 
-# ── HSV calibration helper ────────────────────────────────────────────────────
-# Run this standalone to find HSV ranges for your tip color:
 if __name__ == "__main__":
     cap = cv2.VideoCapture(0)
     def nothing(x): pass
