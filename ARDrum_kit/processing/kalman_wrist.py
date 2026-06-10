@@ -6,7 +6,7 @@ class WristKalman:
     def __init__(self, dt: float = 1 / 30,
                  process_noise: float = 1e-2,
                  measurement_noise: float = 1e-1):
-        ''' this is kalman with6 hidden vars that doesnt account for acceleration, if new one feels wierd return to this
+        # this is kalman with6 hidden vars that doesnt account for acceleration, if new one feels wierd return to this
         self._kf = cv2.KalmanFilter(6, 3)
         F = np.eye(6, dtype=np.float32)
         F[0, 3] = dt
@@ -14,21 +14,8 @@ class WristKalman:
         F[2, 5] = dt
        
         self._kf.transitionMatrix = F
-        '''
-        self._kf = cv2.KalmanFilter(9, 3)
-        F = np.eye(9, dtype=np.float32)
+        
 
-        # Position updates (x + v*dt + 0.5*a*dt^2)
-        F[0, 3] = dt; F[0, 6] = 0.5 * dt**2  # X-axis
-        F[1, 4] = dt; F[1, 7] = 0.5 * dt**2  # Y-axis
-        F[2, 5] = dt; F[2, 8] = 0.5 * dt**2  # Z-axis
-
-        # Velocity updates (v + a*dt)
-        F[3, 6] = dt  # X-axis velocity
-        F[4, 7] = dt  # Y-axis velocity
-        F[5, 8] = dt  # Z-axis velocity
-
-        self._kf.transitionMatrix = F
         H = np.zeros((3, 6), dtype=np.float32)
         H[0, 0] = 1.0
         H[1, 1] = 1.0
